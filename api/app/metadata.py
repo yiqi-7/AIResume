@@ -93,41 +93,62 @@ class Metadata:
         return datetime.now(UTC).strftime("%Y%m%d")
 
     async def reserve_analysis(self, ip_key: str, byok: bool):
-        keys = ["ro:daily:" + self.day + ":sessions",
-                "ro:daily:" + self.day + ":ip:" + ip_key]
-        daily = self.settings.global_daily
+        key = "ro:daily:" + self.day + ":ip:" + ip_key
         free = 0 if byok else self.settings.free_daily
         if self.client:
             script = """
-local all=tonumber(redis.call('GET',KEYS[1]) or '0')
-local own=tonumber(redis.call('GET',KEYS[2]) or '0')
-if all>=tonumber(ARGV[1]) then return 1 end
-if tonumber(ARGV[2])>0 and own>=tonumber(ARGV[2]) then return 2 end
-redis.call('INCR',KEYS[1]);redis.call('EXPIRE',KEYS[1],90000)
-if tonumber(ARGV[2])>0 then
-redis.call('INCR',KEYS[2]);redis.call('EXPIRE',KEYS[2],90000) end
+local own=tonumber(redis.call('GET',KEYS[1]) or '0')
+if tonumber(ARGV[1])>0 and own>=tonumber(ARGV[1]) then return 1 end
+if tonumber(ARGV[1])>0 then redis.call('INCR',KEYS[1]);redis.call('EXPIRE',KEYS[1],90000) end
 return 0
 """
-            result = int(await self.client.eval(script, 2, *keys, daily, free))
+            result = int(await self.client.eval(script, 1, key, free))
         else:
             async with self.lock:
-                now = time.time()
-                counts = [int(self.values.get(k, ("0", 0))[0])
-                          if self.values.get(k, ("0", 0))[1] > now else 0 for k in keys]
-                result = 1 if counts[0] >= daily else (
-                    2 if free and counts[1] >= free else 0
-                )
-                if not result:
-                    self.values[keys[0]] = (str(counts[0] + 1), now + 90000)
-                    if free:
-                        self.values[keys[1]] = (str(counts[1] + 1), now + 90000)
+                count, expiry = self.values.get(key, ("0", 0))
+                count = int(count) if expiry > time.time() else 0
+                result = bool(free and count >= free)
+                if free and not result:
+                    self.values[key] = (str(count + 1), time.time() + 90000)
         if result:
             raise Problem(
                 "DAILY_LIMIT",
-                "今日体验额度已用完，请稍后再试。" if result == 1 else
                 "当前网络今日免费额度已用完，可以使用自己的模型 Key。",
                 429,
             )
+
+    async def reserve_session(self):
+        key = "ro:daily:" + self.day + ":sessions"
+        if self.client:
+            script = """
+local count=tonumber(redis.call('GET',KEYS[1]) or '0')
+if count>=tonumber(ARGV[1]) then return 0 end
+redis.call('INCR',KEYS[1]);redis.call('EXPIRE',KEYS[1],90000);return 1
+"""
+            result = await self.client.eval(script, 1, key, self.settings.global_daily)
+        else:
+            async with self.lock:
+                count, expiry = self.values.get(key, ("0", 0))
+                count = int(count) if expiry > time.time() else 0
+                result = count < self.settings.global_daily
+                if result:
+                    self.values[key] = (str(count + 1), time.time() + 90000)
+        if not result:
+            raise Problem("DAILY_LIMIT", "今日匿名体验会话已达服务上限，请稍后再试。", 429)
+
+    async def release_session(self):
+        key = "ro:daily:" + self.day + ":sessions"
+        if self.client:
+            await self.client.eval(
+                "local n=tonumber(redis.call('GET',KEYS[1]) or '0');"
+                "if n>0 then return redis.call('DECR',KEYS[1]) end;return 0",
+                1, key,
+            )
+        else:
+            async with self.lock:
+                count, expiry = self.values.get(key, ("0", 0))
+                if expiry > time.time() and int(count) > 0:
+                    self.values[key] = (str(int(count) - 1), expiry)
 
     async def reserve_tokens(self, amount: int):
         key = "ro:daily:" + self.day + ":budget"

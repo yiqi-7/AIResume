@@ -225,7 +225,7 @@ def create_app(settings: Settings | None = None, model_transport=None):
             await store.write(session, touch=True)
         return {"expires_at": session.expires_at}
 
-    async def run_analysis(sid: str, credentials):
+    async def run_analysis(sid: str, credentials, dimensions):
         async def run_dimension(dimension, snapshot):
             try:
                 items = await model.dimension(dimension, snapshot, credentials)
@@ -248,13 +248,13 @@ def create_app(settings: Settings | None = None, model_transport=None):
         try:
             snapshot = await store.read(sid)
             async with asyncio.timeout(settings.task_timeout):
-                result = await asyncio.gather(
-                    *(run_dimension(d, snapshot) for d in ["structure", "content", "relevance"])
+                await asyncio.gather(
+                    *(run_dimension(d, snapshot) for d in dimensions)
                 )
             async with store.lock(sid):
                 session = await store.read(sid)
-                successes = result.count("complete")
-                session.state = "ready" if successes == 3 else "partial" if successes else "failed"
+                completed = sum(status == "complete" for status in session.dimensions.values())
+                session.state = "ready" if completed == 3 else "partial" if completed else "failed"
                 section_weights = {"experience": 3, "projects": 3, "education": 2, "skills": 1}
                 positions = {b.id: (section_weights.get(s.kind, 0), i)
                              for s in session.resume.sections for i, b in enumerate(s.blocks)}
@@ -291,7 +291,13 @@ def create_app(settings: Settings | None = None, model_transport=None):
         async with store.job_guard:
             async with store.lock(sid):
                 session = await store.read(sid)
-                if sid in store.jobs or session.state in {"ready", "partial"}:
+                if sid in store.jobs or session.state == "ready":
+                    return public_session(session)
+                dimensions = [
+                    dimension for dimension in ["structure", "content", "relevance"]
+                    if session.dimensions.get(dimension) != "complete"
+                ]
+                if not dimensions:
                     return public_session(session)
                 if len(store.jobs) >= settings.max_active_jobs:
                     raise Problem("BUSY", "当前正在处理其他简历，请稍后重试。", 429)
@@ -302,10 +308,10 @@ def create_app(settings: Settings | None = None, model_transport=None):
                     session.charged = True
                 session.state, session.error = "analyzing", None
                 session.analysis_attempts += 1
-                session.suggestions = []
-                session.dimensions = {d: "analyzing" for d in ["structure", "content", "relevance"]}
+                for dimension in dimensions:
+                    session.dimensions[dimension] = "analyzing"
                 await store.write(session, touch=True)
-                store.jobs[sid] = asyncio.create_task(run_analysis(sid, credentials))
+                store.jobs[sid] = asyncio.create_task(run_analysis(sid, credentials, dimensions))
         return public_session(session)
 
     @app.patch("/api/sessions/{sid}/suggestions/{gid}")
@@ -366,7 +372,7 @@ def create_app(settings: Settings | None = None, model_transport=None):
             async with store.lock(sid):
                 try:
                     session = await store.read(sid)
-                    session.state = "partial"
+                    session.state = "ready"
                     session.error = exc.code if isinstance(exc, Problem) else "ANSWER_FAILED"
                     await store.write(session)
                 except Problem:
@@ -446,6 +452,14 @@ def create_app(settings: Settings | None = None, model_transport=None):
         if not expected or not hmac.compare_digest(authorization or "", "Bearer " + expected):
             raise Problem("NOT_FOUND", "页面不存在。", 404)
         return {"date_utc": metadata.day, "counters": await metadata.stats()}
+
+    @app.post("/admin/cleanup")
+    async def cleanup(authorization: str | None = Header(default=None)):
+        expected = settings.admin_token.get_secret_value()
+        if not expected or not hmac.compare_digest(authorization or "", "Bearer " + expected):
+            raise Problem("NOT_FOUND", "页面不存在。", 404)
+        await store.sweep()
+        return {"status": "ok"}
 
     return app
 

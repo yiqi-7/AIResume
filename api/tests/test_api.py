@@ -132,3 +132,57 @@ async def test_missing_model_preserves_parsed_material(client):
     assert result.status_code == 503 and result.json()["code"] == "MODEL_NOT_CONFIGURED"
     session = (await c.get(f"/api/sessions/{sid}")).json()
     assert session["state"] == "parsed"
+
+
+async def test_partial_analysis_retries_only_failed_dimension_and_keeps_decisions(client):
+    c, app = client
+    sid = (await upload(c))["id"]
+    attempts = 0
+
+    def fail_once(req):
+        nonlocal attempts
+        payload = json.loads(req.content)
+        data = json.loads(payload["messages"][1]["content"])
+        if data.get("dimension") == "content":
+            attempts += 1
+            if attempts <= 2:
+                return httpx.Response(503)
+        return mock_model(req)
+
+    await app.state.model.close()
+    app.state.model.http = httpx.AsyncClient(transport=httpx.MockTransport(fail_once))
+    response = await c.post(f"/api/sessions/{sid}/analyze", json={})
+    partial = await wait_ready(c, sid)
+    assert response.status_code == 202 and partial["state"] == "partial"
+    assert partial["dimensions"]["content"] == "failed"
+    existing = partial["suggestions"][0]
+    path = f"/api/sessions/{sid}/suggestions/{existing['id']}"
+    accepted = await c.patch(path, json={"action": "skip", "revision": partial["revision"]})
+    assert accepted.status_code == 200
+    retry = await c.post(f"/api/sessions/{sid}/analyze", json={})
+    ready = await wait_ready(c, sid)
+    assert retry.status_code == 202 and ready["state"] == "ready"
+    assert attempts == 3
+    kept = next(item for item in ready["suggestions"] if item["id"] == existing["id"])
+    assert kept["decision"] == "skipped"
+
+
+async def test_failed_fact_rewrite_preserves_completed_analysis_for_retry(client):
+    c, app = client
+    sid = (await upload(c))["id"]
+    await c.post(f"/api/sessions/{sid}/analyze", json={})
+    session = await wait_ready(c, sid)
+    gap = next(item for item in session["suggestions"] if item["needs_fact"])
+    await app.state.model.close()
+    app.state.model.http = httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda req: httpx.Response(503)))
+    result = await c.post(
+        f"/api/sessions/{sid}/suggestions/{gap['id']}/answer",
+        json={"answer": "和同学核对需求文档。", "section_id": session["resume"]["sections"][-1]["id"],
+              "confirmed": True},
+    )
+    assert result.status_code == 202
+    failed = await wait_ready(c, sid)
+    assert failed["state"] == "ready" and failed["error"] == "MODEL_UPSTREAM"
+    assert all(value == "complete" for value in failed["dimensions"].values())
+    assert next(item for item in failed["suggestions"] if item["id"] == gap["id"])["needs_fact"]

@@ -69,15 +69,21 @@ class Store:
             ip_key=ip_key, resume=resume, jd=jd,
         )
         directory = self.directory(sid)
-        try:
-            directory.mkdir(mode=0o700)
-            (directory / "raw.docx").write_bytes(raw)
-            self._write(session)
-            await self.save_metadata(session)
-        except Exception:
-            shutil.rmtree(directory, ignore_errors=True)
-            await self.metadata.release_ip(ip_key, sid)
-            raise
+        reserved = False
+        async with self.lock(sid):
+            try:
+                await self.metadata.reserve_session()
+                reserved = True
+                directory.mkdir(mode=0o700)
+                (directory / "raw.docx").write_bytes(raw)
+                self._write(session)
+                await self.save_metadata(session)
+            except Exception:
+                shutil.rmtree(directory, ignore_errors=True)
+                if reserved:
+                    await self.metadata.release_session()
+                await self.metadata.release_ip(ip_key, sid)
+                raise
         return session, sid + "." + token
 
     def _write(self, session: Session):
@@ -141,9 +147,17 @@ class Store:
         self._write(session)
         await self.save_metadata(session)
 
-    async def purge(self, sid: str, reason: str = "ended"):
+    async def purge(self, sid: str, reason: str = "ended", expired_only: bool = False):
         path = self.directory(sid)
+        pending_key = "purge-pending:" + sid
         async with self.lock(sid):
+            if expired_only:
+                try:
+                    current = json.loads((path / "session.json").read_text(encoding="utf-8"))
+                    if float(current["expires_at"]) > time.time():
+                        return
+                except (OSError, ValueError, KeyError):
+                    pass
             await self.metadata.delete("session:" + sid)
             job = self.jobs.get(sid)
             if job and job is not asyncio.current_task() and not job.done():
@@ -158,8 +172,10 @@ class Store:
                 try:
                     await asyncio.to_thread(shutil.rmtree, path)
                 except OSError:
+                    await self.metadata.set(pending_key, reason, self.settings.hard_seconds + 3600)
                     logger.error(json.dumps({"event": "purge_failed", "reason": reason}))
                     raise Problem("CLEANUP_RETRY", "材料清理暂时失败，系统会继续重试。", 503)
+            await self.metadata.delete(pending_key)
             if ip_key:
                 await self.metadata.release_ip(ip_key, sid)
         await self.metadata.stat("purged")
@@ -176,8 +192,11 @@ class Store:
                 expired = float(data["expires_at"]) <= time.time()
                 if recover and self.settings.metadata_backend == "memory":
                     expired = True
-                if expired:
-                    await self.purge(path.name, "expired")
+                purge_reason = await self.metadata.get("purge-pending:" + path.name)
+                if purge_reason:
+                    await self.purge(path.name, purge_reason)
+                elif expired:
+                    await self.purge(path.name, "expired", expired_only=not recover)
                 elif recover and data["state"] in {"analyzing", "answering"}:
                     async with self.lock(path.name):
                         session = await self.read(path.name)

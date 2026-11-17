@@ -93,8 +93,12 @@ async def test_daily_quota_is_atomic_and_byok_still_has_global_limit(tmp_path):
     assert sum(result is None for result in outcomes) == 1
     assert sum(isinstance(result, Problem) for result in outcomes) == 4
     await metadata.reserve_analysis("same-ip", True)
-    with pytest.raises(Problem, match="DAILY_LIMIT"):
-        await metadata.reserve_analysis("different-ip", True)
+    sessions = await asyncio.gather(*(metadata.reserve_session() for _ in range(5)),
+                                    return_exceptions=True)
+    assert sum(result is None for result in sessions) == 2
+    assert sum(isinstance(result, Problem) for result in sessions) == 3
+    await metadata.release_session()
+    await metadata.reserve_session()
     await metadata.reserve_tokens(100)
     with pytest.raises(Problem, match="TOKEN_BUDGET"):
         await metadata.reserve_tokens(metadata.settings.daily_tokens)
