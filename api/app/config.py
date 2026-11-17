@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
+from cryptography.fernet import Fernet
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -16,6 +17,7 @@ class Settings(BaseSettings):
     data_dir: Path = Path("../.local/sessions")
     allowed_origins: list[str] = ["http://127.0.0.1:4321", "http://localhost:4321"]
     ip_salt: SecretStr = SecretStr("development-only-do-not-use-in-production")
+    data_encryption_key: SecretStr = SecretStr("")
     llm_base_url: str = ""
     llm_model: str = ""
     llm_api_key: SecretStr = SecretStr("")
@@ -35,9 +37,17 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production(self):
+        data_key = self.data_encryption_key.get_secret_value()
+        if data_key:
+            try:
+                Fernet(data_key.encode("ascii"))
+            except (UnicodeEncodeError, ValueError):
+                raise ValueError("RESUME_DATA_ENCRYPTION_KEY must be a valid Fernet key")
         if self.environment == "production":
             if self.metadata_backend != "redis":
                 raise ValueError("Production requires Redis metadata")
+            if not data_key:
+                raise ValueError("Production requires a data encryption key")
             if self.ip_salt.get_secret_value().startswith("development-"):
                 raise ValueError("Production requires a random IP salt")
             if not self.allowed_origins or any(

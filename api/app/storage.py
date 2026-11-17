@@ -12,6 +12,8 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from cryptography.fernet import Fernet, InvalidToken
+
 from .config import Settings
 from .metadata import Metadata
 from .schemas import Problem, Resume, Session
@@ -20,9 +22,13 @@ logger = logging.getLogger("resume.events")
 
 
 class Store:
+    ENCRYPTED_PREFIX = b"AIRESUME1:"
+
     def __init__(self, settings: Settings, metadata: Metadata):
         self.settings, self.metadata = settings, metadata
         self.root = settings.data_dir.resolve()
+        key = settings.data_encryption_key.get_secret_value()
+        self.cipher = Fernet(key.encode("ascii")) if key else Fernet(Fernet.generate_key())
         self.locks: dict[str, asyncio.Lock] = {}
         self.lock_users: dict[str, int] = {}
         self.jobs: dict[str, asyncio.Task] = {}
@@ -52,7 +58,44 @@ class Store:
             self.root.chmod(0o700)
         except OSError:
             pass
+        self._migrate_plaintext()
         await self.sweep(recover=True)
+
+    def _encode(self, value: bytes) -> bytes:
+        return self.ENCRYPTED_PREFIX + self.cipher.encrypt(value)
+
+    def _decode(self, value: bytes) -> bytes:
+        if not value.startswith(self.ENCRYPTED_PREFIX):
+            return value
+        try:
+            return self.cipher.decrypt(value[len(self.ENCRYPTED_PREFIX):])
+        except InvalidToken as exc:
+            raise ValueError("Stored session data cannot be decrypted") from exc
+
+    def _read_private(self, path: Path) -> bytes:
+        return self._decode(path.read_bytes())
+
+    def _write_private(self, path: Path, value: bytes):
+        temp = path.with_name(path.name + ".tmp")
+        temp.write_bytes(self._encode(value))
+        try:
+            temp.chmod(0o600)
+        except OSError:
+            pass
+        os.replace(temp, path)
+
+    def _migrate_plaintext(self):
+        for directory in self.root.iterdir():
+            if not directory.is_dir() or not re.fullmatch(r"[a-f0-9]{32}", directory.name):
+                continue
+            for name in ("raw.docx", "session.json", "session.tmp"):
+                path = directory / name
+                try:
+                    value = path.read_bytes()
+                    if not value.startswith(self.ENCRYPTED_PREFIX):
+                        self._write_private(path, value)
+                except OSError:
+                    continue
 
     async def create(self, raw: bytes, resume: Resume, jd: str, ip_key: str):
         sid, token = secrets.token_hex(16), secrets.token_urlsafe(32)
@@ -75,7 +118,7 @@ class Store:
                 await self.metadata.reserve_session()
                 reserved = True
                 directory.mkdir(mode=0o700)
-                (directory / "raw.docx").write_bytes(raw)
+                self._write_private(directory / "raw.docx", raw)
                 self._write(session)
                 await self.save_metadata(session)
             except Exception:
@@ -91,7 +134,7 @@ class Store:
         if not directory.is_dir():
             raise Problem("SESSION_GONE", "当前会话已结束，请重新上传。", 410)
         temp = directory / "session.tmp"
-        temp.write_text(session.model_dump_json(), encoding="utf-8")
+        self._write_private(temp, session.model_dump_json().encode("utf-8"))
         os.replace(temp, directory / "session.json")
 
     async def save_metadata(self, session: Session):
@@ -106,7 +149,7 @@ class Store:
     async def read(self, sid: str) -> Session:
         path = self.directory(sid) / "session.json"
         try:
-            session = Session.model_validate_json(path.read_text(encoding="utf-8"))
+            session = Session.model_validate_json(self._read_private(path))
         except (OSError, ValueError):
             raise Problem("SESSION_GONE", "当前会话已结束，请重新上传。", 410)
         if session.expires_at <= time.time():
@@ -153,7 +196,7 @@ class Store:
         async with self.lock(sid):
             if expired_only:
                 try:
-                    current = json.loads((path / "session.json").read_text(encoding="utf-8"))
+                    current = json.loads(self._read_private(path / "session.json"))
                     if float(current["expires_at"]) > time.time():
                         return
                 except (OSError, ValueError, KeyError):
@@ -164,7 +207,7 @@ class Store:
                 job.cancel()
             ip_key = ""
             try:
-                data = json.loads((path / "session.json").read_text(encoding="utf-8"))
+                data = json.loads(self._read_private(path / "session.json"))
                 ip_key = data["ip_key"]
             except (OSError, ValueError, KeyError):
                 pass
@@ -188,7 +231,7 @@ class Store:
             if not path.is_dir() or not re.fullmatch(r"[a-f0-9]{32}", path.name):
                 continue
             try:
-                data = json.loads((path / "session.json").read_text(encoding="utf-8"))
+                data = json.loads(self._read_private(path / "session.json"))
                 expired = float(data["expires_at"]) <= time.time()
                 if recover and self.settings.metadata_backend == "memory":
                     expired = True

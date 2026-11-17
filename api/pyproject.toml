@@ -13,6 +13,7 @@ dependencies = [
   "httpx>=0.28,<1",
   "redis>=5.2,<8",
   "defusedxml>=0.7.1",
+  "cryptography>=44,<47",
 ]
 [dependency-groups]
 dev = ["pytest>=8,<10", "pytest-asyncio>=0.25,<2", "ruff>=0.11,<1"]

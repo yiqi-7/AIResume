@@ -3,6 +3,8 @@ import json
 import time
 
 import pytest
+from cryptography.fernet import Fernet
+from pydantic import ValidationError
 
 from app.config import Settings
 from app.documents import parse_docx
@@ -41,6 +43,45 @@ async def test_authentication_ip_lock_and_metadata_has_no_personal_content(store
     assert not store.directory(session.id).exists()
     assert session.id not in store.locks
     await create(store)
+
+
+async def test_session_files_are_encrypted_at_rest(store):
+    session, _ = await create(store)
+    directory = store.directory(session.id)
+    raw_file = (directory / "raw.docx").read_bytes()
+    session_file = (directory / "session.json").read_bytes()
+    assert raw_file.startswith(store.ENCRYPTED_PREFIX)
+    assert session_file.startswith(store.ENCRYPTED_PREFIX)
+    assert "陈同学".encode() not in raw_file + session_file
+    assert "虚构岗位".encode() not in session_file
+    assert store._read_private(directory / "raw.docx") == make_docx()
+    assert "虚构岗位" in store._read_private(directory / "session.json").decode()
+
+
+async def test_existing_plaintext_session_is_migrated(store):
+    session, _ = await create(store)
+    directory = store.directory(session.id)
+    (directory / "raw.docx").write_bytes(make_docx())
+    (directory / "session.json").write_text(session.model_dump_json(), encoding="utf-8")
+
+    store._migrate_plaintext()
+
+    assert (directory / "raw.docx").read_bytes().startswith(store.ENCRYPTED_PREFIX)
+    assert (directory / "session.json").read_bytes().startswith(store.ENCRYPTED_PREFIX)
+    assert (await store.read(session.id)).id == session.id
+
+
+def test_production_requires_a_valid_encryption_key(tmp_path):
+    common = {
+        "environment": "production",
+        "metadata_backend": "redis",
+        "data_dir": tmp_path,
+        "ip_salt": "random-production-salt",
+        "allowed_origins": ["https://key123456.online"],
+    }
+    with pytest.raises(ValidationError, match="data encryption key"):
+        Settings(**common)
+    Settings(**common, data_encryption_key=Fernet.generate_key().decode())
 
 
 async def test_polling_does_not_touch_idle_deadline_and_hard_limit_is_enforced(store):
