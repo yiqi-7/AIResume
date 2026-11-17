@@ -28,7 +28,10 @@ class Store:
         self.settings, self.metadata = settings, metadata
         self.root = settings.data_dir.resolve()
         key = settings.data_encryption_key.get_secret_value()
-        self.cipher = Fernet(key.encode("ascii")) if key else Fernet(Fernet.generate_key())
+        raw_key = key.encode("ascii") if key else Fernet.generate_key()
+        self.cipher = Fernet(raw_key)
+        self.persistent_key = bool(key)
+        self.key_id = hashlib.sha256(raw_key).hexdigest()
         self.locks: dict[str, asyncio.Lock] = {}
         self.lock_users: dict[str, int] = {}
         self.jobs: dict[str, asyncio.Task] = {}
@@ -58,6 +61,7 @@ class Store:
             self.root.chmod(0o700)
         except OSError:
             pass
+        self._verify_encryption_key()
         self._migrate_plaintext()
         await self.sweep(recover=True)
 
@@ -69,8 +73,31 @@ class Store:
             return value
         try:
             return self.cipher.decrypt(value[len(self.ENCRYPTED_PREFIX):])
-        except InvalidToken as exc:
-            raise ValueError("Stored session data cannot be decrypted") from exc
+        except InvalidToken:
+            raise RuntimeError("Session decryption failed; restore the configured data key") from None
+
+    def _verify_encryption_key(self):
+        marker = self.root / ".encryption-key-id"
+        if marker.exists() and not hmac.compare_digest(marker.read_text().strip(), self.key_id):
+            raise RuntimeError("Data encryption key changed; restore the original key before startup")
+        if not self.persistent_key:
+            return  # In-memory development sessions are purged on restart.
+        # Verify older encrypted stores before creating their first key marker.
+        for directory in self.root.iterdir():
+            if not directory.is_dir() or not re.fullmatch(r"[a-f0-9]{32}", directory.name):
+                continue
+            for name in ("raw.docx", "session.json", "session.tmp"):
+                path = directory / name
+                try:
+                    value = path.read_bytes()
+                except FileNotFoundError:
+                    continue
+                if value.startswith(self.ENCRYPTED_PREFIX):
+                    self._decode(value)
+        if not marker.exists():
+            temp = marker.with_suffix(".tmp")
+            temp.write_text(self.key_id, encoding="ascii")
+            os.replace(temp, marker)
 
     def _read_private(self, path: Path) -> bytes:
         return self._decode(path.read_bytes())
@@ -94,7 +121,7 @@ class Store:
                     value = path.read_bytes()
                     if not value.startswith(self.ENCRYPTED_PREFIX):
                         self._write_private(path, value)
-                except OSError:
+                except FileNotFoundError:
                     continue
 
     async def create(self, raw: bytes, resume: Resume, jd: str, ip_key: str):
@@ -190,7 +217,8 @@ class Store:
         self._write(session)
         await self.save_metadata(session)
 
-    async def purge(self, sid: str, reason: str = "ended", expired_only: bool = False):
+    async def purge(self, sid: str, reason: str = "ended", expired_only: bool = False,
+                    read_content: bool = True):
         path = self.directory(sid)
         pending_key = "purge-pending:" + sid
         async with self.lock(sid):
@@ -206,11 +234,12 @@ class Store:
             if job and job is not asyncio.current_task() and not job.done():
                 job.cancel()
             ip_key = ""
-            try:
-                data = json.loads(self._read_private(path / "session.json"))
-                ip_key = data["ip_key"]
-            except (OSError, ValueError, KeyError):
-                pass
+            if read_content:
+                try:
+                    data = json.loads(self._read_private(path / "session.json"))
+                    ip_key = data["ip_key"]
+                except (OSError, ValueError, KeyError):
+                    pass
             if path.exists():
                 try:
                     await asyncio.to_thread(shutil.rmtree, path)
@@ -231,6 +260,9 @@ class Store:
             if not path.is_dir() or not re.fullmatch(r"[a-f0-9]{32}", path.name):
                 continue
             try:
+                if recover and self.settings.metadata_backend == "memory" and not self.persistent_key:
+                    await self.purge(path.name, "development_restart", read_content=False)
+                    continue
                 data = json.loads(self._read_private(path / "session.json"))
                 expired = float(data["expires_at"]) <= time.time()
                 if recover and self.settings.metadata_backend == "memory":

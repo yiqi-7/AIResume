@@ -85,6 +85,46 @@ def test_production_requires_a_valid_encryption_key(tmp_path):
     Settings(**common, data_encryption_key=Fernet.generate_key().decode())
 
 
+def test_invalid_settings_never_echo_other_secret_values():
+    with pytest.raises(ValidationError) as error:
+        Settings(data_encryption_key="invalid-key", admin_token="synthetic-private-marker")
+    assert "synthetic-private-marker" not in str(error.value)
+
+
+@pytest.mark.parametrize("legacy_store", [False, True])
+async def test_wrong_encryption_key_stops_startup_without_purging(tmp_path, legacy_store):
+    settings = Settings(data_dir=tmp_path, data_encryption_key=Fernet.generate_key().decode())
+    metadata = Metadata(settings)
+    store = Store(settings, metadata)
+    await store.start()
+    session, cookie = await create(store)
+    if legacy_store:
+        (tmp_path / ".encryption-key-id").unlink()
+    wrong_settings = Settings(data_dir=tmp_path, data_encryption_key=Fernet.generate_key().decode())
+    restarted = Store(wrong_settings, metadata)
+    with pytest.raises(RuntimeError, match="key"):
+        await restarted.start()
+    assert store.directory(session.id).is_dir()
+    await store.authorize(session.id, cookie)
+    assert (await store.read(session.id)).jd == "虚构岗位内容"
+    await store.purge(session.id)
+
+
+async def test_plaintext_migration_failure_stops_startup(store, monkeypatch):
+    session, _ = await create(store)
+    path = store.directory(session.id) / "session.json"
+    path.write_text(session.model_dump_json(), encoding="utf-8")
+    restarted = Store(store.settings, store.metadata)
+
+    def fail_write(*args):
+        raise OSError("synthetic disk failure")
+
+    monkeypatch.setattr(restarted, "_write_private", fail_write)
+    with pytest.raises(OSError, match="disk failure"):
+        await restarted.start()
+    assert path.is_file()
+
+
 async def test_polling_does_not_touch_idle_deadline_and_hard_limit_is_enforced(store):
     session, _ = await create(store)
     deadline = session.expires_at

@@ -9,7 +9,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_prefix="RESUME_", env_file=".env", extra="ignore", env_file_encoding="utf-8"
+        env_prefix="RESUME_", env_file=".env", extra="ignore", env_file_encoding="utf-8",
+        hide_input_in_errors=True,
     )
     environment: Literal["development", "production"] = "development"
     metadata_backend: Literal["memory", "redis"] = "memory"
@@ -43,6 +44,8 @@ class Settings(BaseSettings):
                 Fernet(data_key.encode("ascii"))
             except (UnicodeEncodeError, ValueError):
                 raise ValueError("RESUME_DATA_ENCRYPTION_KEY must be a valid Fernet key")
+        if self.metadata_backend == "redis" and not data_key:
+            raise ValueError("Redis-backed sessions require a data encryption key")
         if self.environment == "production":
             if self.metadata_backend != "redis":
                 raise ValueError("Production requires Redis metadata")
