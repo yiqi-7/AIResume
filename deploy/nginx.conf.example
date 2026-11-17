@@ -3,12 +3,12 @@ server {
     listen 443 ssl;
     server_name key123456.online;
     ssl_protocols TLSv1.2 TLSv1.3;
-    # Generate this include from Cloudflare's current official IP ranges.
-    # It must contain set_real_ip_from entries and allow entries for those ranges;
-    # its final directive must be deny all. Never trust CF-Connecting-IP without it.
+    # Generate the real-IP and origin-guard includes from Cloudflare's official IP ranges.
     include /etc/nginx/cloudflare-real-ip.conf;
     real_ip_header CF-Connecting-IP;
     real_ip_recursive on;
+    # The guard checks the original peer address because $remote_addr now holds the visitor IP.
+    if ($airesume_from_cloudflare = 0) { return 403; }
     ssl_certificate /etc/letsencrypt/live/key123456.online/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/key123456.online/privkey.pem;
     root /opt/airesume/web/dist;
