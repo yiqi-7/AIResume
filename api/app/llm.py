@@ -32,7 +32,12 @@ def grounded(item: Candidate, resume: Resume, jd: str, fact: str = "") -> bool:
     if not normalize(item.jd_quote) or normalize(item.jd_quote) not in normalize(jd):
         return False
     if item.needs_fact:
-        return not item.rewrite and bool(item.question.strip())
+        return (
+            not item.rewrite
+            and bool(item.question.strip())
+            and not item.resume_quote
+            and item.target_block_id is None
+        )
     if not item.rewrite.strip():
         return False
     blocks = {b.id: b.text for s in resume.sections for b in s.blocks}

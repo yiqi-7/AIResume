@@ -363,7 +363,11 @@ def create_app(settings: Settings | None = None, model_transport=None):
                 item.rewrite, item.user_fact = rewrite, data.answer
                 item.target_block_id, item.target_section_id = None, data.section_id
                 item.needs_fact = False
-                session.state, session.error = "ready", None
+                session.state = (
+                    "ready" if all(v == "complete" for v in session.dimensions.values())
+                    else "partial"
+                )
+                session.error = None
                 session.revision += 1
                 await store.write(session)
         except asyncio.CancelledError:
@@ -372,7 +376,10 @@ def create_app(settings: Settings | None = None, model_transport=None):
             async with store.lock(sid):
                 try:
                     session = await store.read(sid)
-                    session.state = "ready"
+                    session.state = (
+                        "ready" if all(v == "complete" for v in session.dimensions.values())
+                        else "partial"
+                    )
                     session.error = exc.code if isinstance(exc, Problem) else "ANSWER_FAILED"
                     await store.write(session)
                 except Problem:

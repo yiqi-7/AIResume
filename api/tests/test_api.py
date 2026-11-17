@@ -186,3 +186,47 @@ async def test_failed_fact_rewrite_preserves_completed_analysis_for_retry(client
     assert failed["state"] == "ready" and failed["error"] == "MODEL_UPSTREAM"
     assert all(value == "complete" for value in failed["dimensions"].values())
     assert next(item for item in failed["suggestions"] if item["id"] == gap["id"])["needs_fact"]
+
+
+@pytest.mark.parametrize("fact_fails", [False, True])
+async def test_fact_answer_keeps_failed_dimension_retryable(client, fact_fails):
+    c, app = client
+    sid = (await upload(c))["id"]
+    attempts = 0
+
+    def fail_once(req):
+        nonlocal attempts
+        payload = json.loads(req.content)
+        data = json.loads(payload["messages"][1]["content"])
+        if data.get("dimension") == "content":
+            attempts += 1
+            if attempts <= 2:
+                return httpx.Response(503)
+        if fact_fails and "confirmed_fact" in data:
+            return httpx.Response(503)
+        return mock_model(req)
+
+    await app.state.model.close()
+    app.state.model.http = httpx.AsyncClient(transport=httpx.MockTransport(fail_once))
+    await c.post(f"/api/sessions/{sid}/analyze", json={})
+    partial = await wait_ready(c, sid)
+    assert partial["state"] == "partial"
+    gap = next(item for item in partial["suggestions"] if item["needs_fact"])
+    section = partial["resume"]["sections"][-1]["id"]
+    result = await c.post(
+        f"/api/sessions/{sid}/suggestions/{gap['id']}/answer",
+        json={"answer": "和同学核对需求文档。", "section_id": section, "confirmed": True},
+    )
+    assert result.status_code == 202
+    answered = await wait_ready(c, sid)
+    assert answered["state"] == "partial"
+    assert answered["error"] == ("MODEL_UPSTREAM" if fact_fails else None)
+    answered_gap = next(item for item in answered["suggestions"] if item["id"] == gap["id"])
+    assert answered_gap["needs_fact"] is fact_fails
+    assert answered_gap["user_fact"] == ("" if fact_fails else "和同学核对需求文档。")
+    await c.post(f"/api/sessions/{sid}/analyze", json={})
+    ready = await wait_ready(c, sid)
+    assert ready["state"] == "ready" and attempts == 3
+    assert next(item for item in ready["suggestions"] if item["id"] == gap["id"])["user_fact"] == (
+        "" if fact_fails else "和同学核对需求文档。"
+    )

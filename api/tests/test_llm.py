@@ -45,8 +45,11 @@ def test_quotes_punctuation_and_numeric_tokens_are_not_fuzzy_matches():
     assert not grounded(candidate.model_copy(update={"rewrite": "访谈了 1 位同学"}),
                         session.resume, JD, fact="访谈了 10 位同学")
     gap = candidate.model_copy(update={"needs_fact": True, "rewrite": "", "question": "怎样沟通？"})
+    gap = gap.model_copy(update={"target_block_id": None, "resume_quote": ""})
     assert grounded(gap, session.resume, JD)
     assert not grounded(gap.model_copy(update={"rewrite": "擅长沟通"}), session.resume, JD)
+    assert not grounded(gap.model_copy(update={"target_block_id": "missing",
+                                               "resume_quote": "管理 20 人团队"}), session.resume, JD)
 
 
 async def test_json_and_grounding_failures_share_one_retry():
