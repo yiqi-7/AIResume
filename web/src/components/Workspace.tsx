@@ -38,7 +38,8 @@ export default function Workspace(){
   const [factsConfirmed,setFactsConfirmed]=useState(false);
   const fileInput=useRef<HTMLInputElement>(null);
   const lastTouch=useRef(0);
-  const item=session?.suggestions.find(s=>s.id===active)??session?.suggestions[0];
+  const visible=session?.suggestions.filter(s=>filter==='all'||s.decision===filter)??[];
+  const item=visible.find(s=>s.id===active)??visible[0];
   const running=isRunning(session);
   const reviewable=isReviewable(session);
 
@@ -126,7 +127,6 @@ export default function Workspace(){
       setSession(null);setPreview(null);setNotice('下载已发起，本次会话已结束，服务端临时数据正在清理。请在浏览器下载列表中确认文件。');
     }else{if(!demo)await request(`/api/sessions/${session.id}`,{method:'DELETE'});if(demo){location.href='/app/';return;}setSession(null);setPreview(null);setNotice('本次会话已结束，服务端材料已清除。');}
   });}
-  const visible=session?.suggestions.filter(s=>filter==='all'||s.decision===filter)??[];
   const accepted=session?.suggestions.filter(s=>s.decision==='accepted').length??0;
   const currentIndex=visible.findIndex(s=>s.id===item?.id);
   const step=!session?1:session.state==='parsed'?2:3;
