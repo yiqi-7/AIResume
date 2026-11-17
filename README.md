@@ -1,41 +1,73 @@
 # AIResume
 
-面向应届生和校招生的 AI 简历优化工具：上传 DOCX、粘贴目标岗位 JD、逐条确认有依据的建议，最后导出可编辑 DOCX。
+面向应届生和校招生的简历编辑工具。上传 DOCX、粘贴目标岗位 JD，查看引用依据、逐条核对和编辑建议，最后预览并下载可继续编辑的 Word 文档。
 
-**当前阶段：需求与技术选型。仓库尚无可运行的前后端应用。**
+## 当前状态
+
+本仓库包含可本地运行的 MVP。开发模式明确使用进程内元数据，不连接云模型前端无法产生站方分析；可在模型设置中填写用户自己的 DeepSeek、通义千问或智谱 Key，或者先查看不调用模型的虚构示例。测试模型只存在于测试/本地 QA fixture，生产服务不会自动使用它。
+
+产品域名规划为 `key123456.online`。当前实现不配置 DNS、证书、不改变服务器或现有 Sub2API。服务商数据处理地区和保留策略需要运营方在启用模型前确认。
 
 ## 项目文档
 
 - [产品需求 PRD](PRD.md)
 - [技术栈方案](TECH-STACK.md)
+- [实现状态、设计参考与测试](IMPLEMENTATION.md)
 - [团队协作规范](CONTRIBUTING.md)
 - [AI 协作约定](AGENTS.md)
 
-## 已选技术栈
+## 技术栈
 
-- 前端：Astro 静态站、React、TypeScript、Tailwind CSS、Radix Primitives。
-- 后端：Python 3.12、FastAPI、Uvicorn、uv、Pydantic。
-- 数据：Redis 存状态与计数；个人会话内容仅在私有临时目录处理。
-- 文档：python-docx 解析和生成，HTML 预览。
-- 模型：云 API，支持站方配置与用户 BYOK。
-- 部署：nginx + systemd；规划入口为 key123456.online。
+- Web：Astro 静态站、React、TypeScript、Tailwind CSS 工具链、自有 CSS、Radix Dialog、Lucide。
+- API：Python 3.12、FastAPI、Uvicorn、Pydantic、HTTPX、Redis。
+- Word 文档：python-docx 与 A4 可编辑模板；不承诺与 Word 一致的分页预览。
+- 临时会话内容只在私有本地目录保存；Redis 只用于非正文会话元数据、限额和聚合计数。
+- 模型：站方 OpenAI-compatible HTTPS 接口配置或用户选择服务商的 BYOK；后端不会保存 BYOK。
 
-供应商、依赖精确版本和部分实现参数尚待验证，以技术方案中的状态说明为准。
+## 开发环境
 
-## 安装与启动
+Node.js 24、npm 11，Python 3.12 与 uv。第一次安装前后端依赖：
 
-目前没有应用代码、依赖清单或启动命令。web/、api/ 和部署文件将在对应 Issue 的任务分支中实现后补充；不要把文档中的规划目录当作现有程序。
+```powershell
+cd web
+npm ci
+cd ..\api
+uv sync --group dev
+```
 
-后续开发基线为 Node.js 24 和 Python 3.12，前端使用 npm，后端使用 uv。依赖锁文件随代码一同提交。
+复制 `api/.env.example` 为 `api/.env` 仅用于本地配置，不要提交该文件。默认本地开发使用 memory 元数据后端，无 Redis 或站方模型时仍可打开产品和虚构示例。
 
-## 协作流程
+分别启动 API 和 Web 开发服务器：
 
-先建 Issue，再从最新 main 创建任务分支。提交信息采用“类型: 具体改动”，完成后推送分支并按模板提交 PR。
+```powershell
+# 终端 1，仓库根目录
+./scripts/dev.ps1 api
 
-分支示例：docs/1-project-foundation。PR 使用 Refs #编号，待独立 AI 审查和非作者成员人工批准后，由维护者 Squash and merge；主线验收后关闭 Issue。合并与生产发布需要维护者另行确认。
+# 终端 2，仓库根目录
+./scripts/dev.ps1 web
+```
 
-详见 [CONTRIBUTING.md](CONTRIBUTING.md)。不要将真实凭据、本地配置、简历和会话数据加入仓库。
+Web 地址为 `http://127.0.0.1:4321`，API 为 `http://127.0.0.1:8010`，本地 API 文档为 `http://127.0.0.1:8010/api/docs`。开发服务器不应暴露到公网。
 
-## 检查与验收
+## 验证
 
-当前文档任务检查 Markdown 结构、相对链接、内容一致性和暂存区，记录实际执行结果。应用实现后，再由相应任务补充安装、启动、测试与构建命令；本仓库暂不提供虚构的检查脚本。
+```powershell
+cd api
+uv run ruff check app tests
+uv run pytest -q
+cd ..\web
+npm run check
+npm run build
+```
+
+需要完整浏览器测试时，安装 Playwright Python 包并配置本机 Chrome，然后在仓库根目录运行 `python scripts/browser_qa.py`。这会启动隔离端口上的临时 API 与 Web 服务、写入被 Git 忽略的 `.local/qa`、使用显式 mocked model 走通页面工作流，不会访问真实云模型。
+
+## 部署
+
+部署样例位于 `deploy/`。它们是人工执行前待核对的配置样例，不表示服务器已配置或上线。生成 nginx 对 Cloudflare 源站 IP 的信任/访问规则前，先阅读 `deploy/nginx.conf.example` 与 `deploy/generate_cloudflare_nginx.py`。人工检查生成的规则、确认 Cloudflare 橙云代理、证书路径、现有 nginx 虚拟主机与 Redis 连接之后，才可以部署。项目服务监听回环地址、单 Uvicorn worker，避免读取未受信任的 X-Forwarded-For。
+
+生产变量样例位于 `deploy/api.env.example`；不要把生产变量或任何 Token 放入仓库。`deploy/airesume-cleanup.timer` 是应用补充清理任务，不替代进程内清理或目录权限。不得在没有单独确认的情况下修改用户服务器、DNS、证书、nginx、Redis 或其他线上服务。
+
+## 协作与版本
+
+功能以独立 Conventional Commit 记录，并写明改动和实际验证结果。同步目标仓库为 GitHub `yiqi-7/AIResume`。不要提交密钥、本地配置、真实简历、测试会话或导出文件。

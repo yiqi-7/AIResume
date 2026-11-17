@@ -1,0 +1,41 @@
+# Manual deployment template. Check hostname/certificates and the existing nginx config first.
+server {
+    listen 443 ssl;
+    server_name key123456.online;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    # Generate this include from Cloudflare's current official IP ranges.
+    # It must contain set_real_ip_from entries and allow entries for those ranges;
+    # its final directive must be deny all. Never trust CF-Connecting-IP without it.
+    include /etc/nginx/cloudflare-real-ip.conf;
+    real_ip_header CF-Connecting-IP;
+    real_ip_recursive on;
+    ssl_certificate /etc/letsencrypt/live/key123456.online/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/key123456.online/privkey.pem;
+    root /opt/airesume/web/dist;
+    index index.html;
+    client_max_body_size 8m;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+    add_header X-Frame-Options DENY always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+    # Uploaded data must never be placed under the static root.
+    location /api/ {
+        proxy_pass http://127.0.0.1:8010;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        # The origin accepts direct nginx traffic only; never trust a client's XFF chain.
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_read_timeout 210s;
+        proxy_request_buffering on;
+        access_log off;
+    }
+    location /admin/ { return 404; }
+    location / { try_files $uri $uri/ =404; }
+}
+
+server {
+    listen 80;
+    server_name key123456.online;
+    location /.well-known/acme-challenge/ { root /var/www/acme; }
+    location / { return 301 https://$host$request_uri; }
+}

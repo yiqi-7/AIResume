@@ -1,0 +1,27 @@
+[Unit]
+Description=AIResume API
+After=network.target
+
+[Service]
+Type=simple
+User=airesume
+Group=airesume
+WorkingDirectory=/opt/airesume/api
+EnvironmentFile=/etc/airesume/api.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/airesume/api/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8010 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1 --no-access-log
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/airesume
+MemoryMax=384M
+TasksMax=64
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target
