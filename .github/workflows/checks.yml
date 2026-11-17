@@ -40,6 +40,8 @@ jobs:
       - name: Install Python dependencies
         working-directory: api
         run: uv sync --locked --group dev --group qa
+      - name: Install nginx for isolated configuration and proxy verification
+        run: sudo apt-get update -qq && sudo apt-get install -y nginx-core
       - name: Lint Python
         working-directory: api
         run: uv run ruff check app tests ../scripts/browser_qa.py ../deploy/generate_cloudflare_nginx.py
@@ -47,6 +49,7 @@ jobs:
         working-directory: api
         env:
           TEST_REDIS_URL: redis://127.0.0.1:6379/15
+          TEST_NGINX_PATH: /usr/sbin/nginx
         run: uv run pytest -q
       - name: Install frontend dependencies
         working-directory: web
