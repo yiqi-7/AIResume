@@ -1,21 +1,74 @@
 """Local browser QA against a real API and a mocked model; never calls a cloud model.
 
-Requires the optional QA packages: python -m pip install playwright pillow pymupdf
+Run npm run build in web first. Requires: python -m pip install playwright python-docx
 Chrome is used from its local installation; no Playwright browser download is required.
 """
+import http.client
 import json
 import os
+import shutil
 import subprocess
-import sys
+import threading
 import time
 import urllib.request
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / ".local" / "qa"
-CHROME = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+CHROME = Path(os.environ.get("BROWSER_QA_CHROME") or shutil.which("google-chrome") or
+              r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+
+
+class StaticQAHandler(SimpleHTTPRequestHandler):
+    """Loopback-only fixture serving built pages and proxying only the dedicated test API."""
+
+    extensions_map = {
+        **SimpleHTTPRequestHandler.extensions_map,
+        ".js": "application/javascript",
+        ".mjs": "application/javascript",
+        ".css": "text/css",
+        ".woff2": "font/woff2",
+    }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=str(ROOT / "web" / "dist"), **kwargs)
+
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        if urlsplit(self.path).path.startswith("/api/"):
+            self.proxy()
+        else:
+            super().do_GET()
+
+    def proxy(self):
+        if not urlsplit(self.path).path.startswith("/api/"):
+            self.send_error(404)
+            return
+        length = int(self.headers.get("Content-Length", "0"))
+        connection = http.client.HTTPConnection("127.0.0.1", 8011, timeout=30)
+        try:
+            headers = {key: value for key, value in self.headers.items()
+                       if key.lower() not in {"connection", "host", "transfer-encoding"}}
+            connection.request(self.command, self.path, self.rfile.read(length), headers)
+            response = connection.getresponse()
+            content = response.read()
+            self.send_response(response.status)
+            for key, value in response.getheaders():
+                if key.lower() not in {"connection", "transfer-encoding", "content-length"}:
+                    self.send_header(key, value)
+            self.send_header("Content-Length", str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+        finally:
+            connection.close()
+
+    do_POST = do_PATCH = do_DELETE = proxy
 
 
 def ready(url):
@@ -30,23 +83,26 @@ def ready(url):
 
 
 def main():
+    if not (ROOT / "web" / "dist" / "app" / "index.html").is_file():
+        raise RuntimeError("Run npm run build in web before browser QA")
     OUT.mkdir(parents=True, exist_ok=True)
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     api_python = ROOT / "api" / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     # One dedicated directory and ports; ordinary development sessions remain untouched.
-    env = {**os.environ, "API_PROXY_TARGET": "http://127.0.0.1:8011"}
     processes = []
     handles = []
+    server = None
     try:
         for name, command, cwd in [
             ("api", [str(api_python), "-m", "uvicorn", "tests.browser_app:app", "--host", "127.0.0.1", "--port", "8011"], ROOT / "api"),
-            ("web", ["node", str(ROOT / "web/node_modules/astro/bin/astro.mjs"), "dev", "--host", "127.0.0.1", "--port", "4322"], ROOT / "web"),
         ]:
             log = (OUT / f"{name}.log").open("w", encoding="utf-8")
             handles.append(log)
-            processes.append(subprocess.Popen(command, cwd=cwd, env=env, stdout=log,
+            processes.append(subprocess.Popen(command, cwd=cwd, env=os.environ, stdout=log,
                                                stderr=log, creationflags=flags))
         ready("http://127.0.0.1:8011/healthz")
+        server = ThreadingHTTPServer(("127.0.0.1", 4322), StaticQAHandler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
         ready("http://127.0.0.1:4322/")
         with urllib.request.urlopen("http://127.0.0.1:4322/api/config", timeout=5) as response:
             assert "application/json" in response.headers["Content-Type"]
@@ -128,11 +184,16 @@ def main():
             downloaded.value.save_as(str(OUT / "exported.docx"))
             expect(page.get_by_text("下载已发起", exact=False)).to_be_visible()
             expect(page.get_by_role("heading", name="先放入你的简历。")).to_be_visible()
+            assert page.request.get("http://127.0.0.1:4322/api/session").json()["session"] is None
+            assert not any((ROOT / ".local" / "qa-sessions").iterdir())
             assert errors == [], errors
             context.close()
             browser.close()
         print(json.dumps({"result": "passed", "model": "mocked upstream only", "artifacts": str(OUT)}, ensure_ascii=False))
     finally:
+        if server:
+            server.shutdown()
+            server.server_close()
         for process in processes:
             process.terminate()
         for process in processes:

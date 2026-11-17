@@ -46,7 +46,8 @@ async def test_authentication_ip_lock_and_metadata_has_no_personal_content(store
 
 
 async def test_session_files_are_encrypted_at_rest(store):
-    session, _ = await create(store)
+    raw = make_docx()
+    session, _ = await store.create(raw, parse_docx(raw), "虚构岗位内容", "ip-hash")
     directory = store.directory(session.id)
     raw_file = (directory / "raw.docx").read_bytes()
     session_file = (directory / "session.json").read_bytes()
@@ -54,7 +55,7 @@ async def test_session_files_are_encrypted_at_rest(store):
     assert session_file.startswith(store.ENCRYPTED_PREFIX)
     assert "陈同学".encode() not in raw_file + session_file
     assert "虚构岗位".encode() not in session_file
-    assert store._read_private(directory / "raw.docx") == make_docx()
+    assert store._read_private(directory / "raw.docx") == raw
     assert "虚构岗位" in store._read_private(directory / "session.json").decode()
 
 
