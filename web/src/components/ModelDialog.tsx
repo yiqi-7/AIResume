@@ -13,17 +13,18 @@ export default function ModelDialog({open,onOpenChange,settings,config,onSave}:P
   function save(e:React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
     if(draft.provider!=='station' && (!draft.key.trim() || !draft.model.trim())){setError('请填写 API Key 和模型名称。');return;}
+    const selected=draft.provider==='station'?{provider:'station',model:'',key:''}:draft;
     try {
-      if(remember && draft.provider!=='station') localStorage.setItem(modelStorageKey,JSON.stringify(draft));
+      if(remember && selected.provider!=='station') localStorage.setItem(modelStorageKey,JSON.stringify(selected));
       else localStorage.removeItem(modelStorageKey);
     } catch {setError('浏览器不允许保存本地设置。请取消“记住”后再试。');if(remember)return;}
-    onSave(draft);onOpenChange(false);
+    onSave(selected);onOpenChange(false);
   }
   function clear(){try{localStorage.removeItem(modelStorageKey);}catch{/* In-memory key is cleared below. */}setRemember(false);setDraft({provider:'station',model:'',key:''});onSave({provider:'station',model:'',key:''});setError('已清除当前页面与浏览器保存的 Key。');}
   return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal><Dialog.Overlay className="dialog-overlay"/><Dialog.Content className="dialog-content">
     <Dialog.Title>模型设置</Dialog.Title><Dialog.Description>选择本次分析使用的服务。简历文字和岗位描述会发送给该服务商。</Dialog.Description>
     <form onSubmit={save} className="settings-form">
-      <label htmlFor="model-provider">模型服务</label><select id="model-provider" value={draft.provider} onChange={e=>setDraft({...draft,provider:e.target.value})}>
+      <label htmlFor="model-provider">模型服务</label><select id="model-provider" value={draft.provider} onChange={e=>setDraft({...draft,provider:e.target.value,model:'',key:''})}>
         <option value="station">站方模型{config?.station_configured?'':'（尚未配置）'}</option>
         {(config?.providers??[{id:'deepseek',name:'DeepSeek'},{id:'qwen',name:'通义千问'},{id:'zhipu',name:'智谱'}]).map(p=><option key={p.id} value={p.id}>{p.name} · 使用自己的 Key</option>)}
       </select>
