@@ -1,6 +1,8 @@
 import asyncio
 import io
 import json
+import threading
+import zipfile
 
 import httpx
 import pytest
@@ -122,6 +124,157 @@ async def test_upload_boundaries_csrf_and_no_secrets_in_errors(client):
     assert result.status_code == 415
     assert "private-filename" not in result.text
     assert (await c.get("/admin/stats")).status_code == 404
+
+
+@pytest.mark.parametrize("case,expected_code", [
+    ("too_large_file", "FILE_TOO_LARGE"),
+    ("too_large_jd", "JD_TOO_LONG"),
+    ("short_jd", "JD_TOO_SHORT"),
+    ("no_consent", "CONSENT_REQUIRED"),
+    ("unsupported_file", "INVALID_DOCX"),
+])
+async def test_upload_rejections_leave_no_private_files(client, case, expected_code):
+    c, app = client
+    filename, raw, jd, consent = "fictional.docx", make_docx(), JD, "true"
+    if case == "too_large_file":
+        raw = b"x" * (app.state.settings.upload_bytes + 1)
+    elif case == "too_large_jd":
+        jd = "岗" * (app.state.settings.jd_bytes // 3 + 1)
+    elif case == "short_jd":
+        jd = "a" * 39
+    elif case == "no_consent":
+        consent = "false"
+    else:
+        filename = "fictional.pdf"
+    result = await c.post("/api/sessions", files={"file": (filename, raw)},
+                          data={"jd": jd, "consent": consent})
+    assert result.status_code in {413, 415, 422}
+    assert result.json()["code"] == expected_code
+    assert not list(app.state.store.root.iterdir())
+
+
+async def test_large_upload_stays_in_memory_until_session_encryption(client, monkeypatch):
+    import starlette.formparsers
+
+    original = starlette.formparsers.SpooledTemporaryFile
+    spools = []
+
+    def track_spool(*args, **kwargs):
+        spool = original(*args, **kwargs)
+        spools.append(spool)
+        return spool
+
+    monkeypatch.setattr(starlette.formparsers, "SpooledTemporaryFile", track_spool)
+    output = io.BytesIO(make_docx())
+    with zipfile.ZipFile(output, "a") as package:
+        package.writestr("large-unused-part.bin", b"x" * (2 * 1024 * 1024))
+    c, app = client
+    response = await c.post("/api/sessions", files={"file": ("fictional.docx", output.getvalue())},
+                            data={"jd": JD, "consent": "true"})
+    assert response.status_code == 201
+    assert spools and all(not spool._rolled for spool in spools)
+    sid = response.json()["id"]
+    assert (app.state.store.directory(sid) / "raw.docx").read_bytes().startswith(b"AIRESUME1:")
+    assert (await c.delete(f"/api/sessions/{sid}")).status_code == 204
+
+
+async def test_upload_admission_precedes_body_read_and_releases_after_parse(client, monkeypatch):
+    from app import main
+
+    entered, release = threading.Event(), threading.Event()
+    original = main.parse_docx
+
+    def slow_parse(raw):
+        entered.set()
+        assert release.wait(5), "test did not release its parser"
+        return original(raw)
+
+    monkeypatch.setattr(main, "parse_docx", slow_parse)
+    c, _ = client
+    first = asyncio.create_task(upload(c))
+    second_read = False
+
+    async def second_body():
+        nonlocal second_read
+        second_read = True
+        yield b"this body must not be consumed while upload capacity is full"
+
+    try:
+        for _ in range(100):
+            if entered.is_set():
+                break
+            await asyncio.sleep(0.01)
+        assert entered.is_set()
+        denied = await c.post("/api/sessions", content=second_body(),
+                              headers={"Content-Type": "multipart/form-data; boundary=test"})
+        assert denied.status_code == 429 and denied.json()["code"] == "BUSY"
+        assert not second_read
+    finally:
+        release.set()
+        session = await first
+        await c.delete(f"/api/sessions/{session['id']}")
+    # The single slot is returned even though the preceding request was rejected.
+    session = await upload(c)
+    assert (await c.delete(f"/api/sessions/{session['id']}")).status_code == 204
+
+
+@pytest.mark.parametrize("truncated", [False, True])
+async def test_chunked_body_limit_and_incomplete_form_close_memory_files(client, monkeypatch,
+                                                                       truncated):
+    import starlette.formparsers
+
+    original = starlette.formparsers.SpooledTemporaryFile
+    spools = []
+
+    def track_spool(*args, **kwargs):
+        spool = original(*args, **kwargs)
+        spools.append(spool)
+        return spool
+
+    monkeypatch.setattr(starlette.formparsers, "SpooledTemporaryFile", track_spool)
+    boundary = "synthetic-upload-boundary"
+    file_header = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; '
+                   'filename="fictional.docx"\r\nContent-Type: application/octet-stream\r\n\r\n')
+    if truncated:
+        parts = [file_header.encode(), make_docx()]
+    else:
+        def field(name, content):
+            return (f'\r\n--{boundary}\r\nContent-Disposition: form-data; name="{name}"'
+                    '\r\n\r\n').encode() + content
+
+        parts = [file_header.encode(), b"x" * (5 * 1024 * 1024),
+                 field("jd", b"j" * (1536 * 1024)), field("consent", b"true"),
+                 field("extra", b"e" * (1792 * 1024)), f"\r\n--{boundary}--\r\n".encode()]
+
+    async def stream():
+        for part in parts:
+            for start in range(0, len(part), 65536):
+                yield part[start:start + 65536]
+
+    c, app = client
+    result = await c.post("/api/sessions", content=stream(),
+                          headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    assert "content-length" not in result.request.headers
+    assert result.status_code == (422 if truncated else 413)
+    assert result.json()["code"] == ("CONSENT_REQUIRED" if truncated else "BODY_TOO_LARGE")
+    assert spools and all(spool.closed and not spool._rolled for spool in spools)
+    assert not list(app.state.store.root.iterdir())
+
+
+async def test_slow_upload_times_out_and_returns_capacity(client):
+    c, app = client
+    app.state.settings.upload_timeout = 0.05
+
+    async def slow_body():
+        yield (b'--slow\r\nContent-Disposition: form-data; name="file"; '
+               b'filename="fictional.docx"\r\n\r\npartial')
+        await asyncio.sleep(10)
+
+    result = await c.post("/api/sessions", content=slow_body(),
+                          headers={"Content-Type": "multipart/form-data; boundary=slow"})
+    assert result.status_code == 408 and result.json()["code"] == "UPLOAD_TIMEOUT"
+    session = await upload(c)
+    assert (await c.delete(f"/api/sessions/{session['id']}")).status_code == 204
 
 
 async def test_missing_model_preserves_parsed_material(client):

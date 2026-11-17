@@ -19,6 +19,7 @@ from .llm import PROVIDERS, ModelClient
 from .metadata import Metadata
 from .schemas import AnalyzeRequest, FactAnswer, Problem, Session, Suggestion, SuggestionEdit
 from .storage import Store
+from .uploads import MAX_BODY_BYTES, upload_form
 
 logger = logging.getLogger("resume.events")
 
@@ -34,6 +35,7 @@ def create_app(settings: Settings | None = None, model_transport=None):
     metadata = Metadata(settings)
     store = Store(settings, metadata)
     model = ModelClient(settings, metadata, transport=model_transport)
+    upload_slots = asyncio.BoundedSemaphore(settings.max_active_uploads)
 
     async def sweeper():
         while True:
@@ -70,6 +72,7 @@ def create_app(settings: Settings | None = None, model_transport=None):
     @app.middleware("http")
     async def boundaries(request: Request, call_next):
         request_id = secrets.token_hex(8)
+        upload_reserved = False
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
             origin = request.headers.get("origin")
             if (
@@ -82,7 +85,7 @@ def create_app(settings: Settings | None = None, model_transport=None):
                     status_code=403,
                 )
             length = request.headers.get("content-length")
-            if length and (not length.isdigit() or int(length) > 8 * 1024 * 1024):
+            if length and (not length.isdigit() or int(length) > MAX_BODY_BYTES):
                 return JSONResponse(
                     {"code": "BODY_TOO_LARGE", "message": "上传内容超过大小限制。"},
                     status_code=413,
@@ -94,10 +97,19 @@ def create_app(settings: Settings | None = None, model_transport=None):
                 nonlocal received
                 message = await original_receive()
                 received += len(message.get("body", b""))
-                if received > 8 * 1024 * 1024:
+                if received > MAX_BODY_BYTES:
+                    request.state.body_too_large = True
                     raise Problem("BODY_TOO_LARGE", "上传内容超过大小限制。", 413)
                 return message
             request._receive = receive
+        if request.method == "POST" and request.url.path == "/api/sessions":
+            if upload_slots.locked():
+                return JSONResponse(
+                    {"code": "BUSY", "message": "正在读取其他简历，请稍后重试上传。"},
+                    status_code=429,
+                )
+            await upload_slots.acquire()
+            upload_reserved = True
         try:
             response = await call_next(request)
         except Problem as exc:
@@ -106,10 +118,18 @@ def create_app(settings: Settings | None = None, model_transport=None):
             )
         except Exception:
             # Never serialize upstream exceptions, request bodies, headers, or local paths.
-            logger.error(json.dumps({"event": "request_failed", "request_id": request_id}))
+            if not getattr(request.state, "body_too_large", False):
+                logger.error(json.dumps({"event": "request_failed", "request_id": request_id}))
             response = JSONResponse(
                 {"code": "SERVER_ERROR", "message": "处理暂时失败，请稍后重试。"},
                 status_code=503,
+            )
+        finally:
+            if upload_reserved:
+                upload_slots.release()
+        if getattr(request.state, "body_too_large", False):
+            response = JSONResponse(
+                {"code": "BODY_TOO_LARGE", "message": "上传内容超过大小限制。"}, status_code=413,
             )
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -175,8 +195,8 @@ def create_app(settings: Settings | None = None, model_transport=None):
 
     @app.post("/api/sessions", status_code=201)
     async def create_session(request: Request, response: Response):
-        async with request.form(max_files=1, max_fields=3,
-                                max_part_size=settings.jd_bytes + 1024) as form:
+        async with upload_form(request, settings.upload_bytes, settings.jd_bytes + 1024,
+                               settings.upload_timeout) as form:
             upload = form.get("file")
             jd = form.get("jd")
             consent = form.get("consent")
