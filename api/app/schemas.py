@@ -71,6 +71,8 @@ class Session(BaseModel):
     error: str | None = None
     charged: bool = False
     revision: int = 0
+    analysis_attempts: int = 0
+    answer_attempts: dict[str, int] = {}
 
 
 class AnalyzeRequest(BaseModel):

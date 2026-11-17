@@ -92,7 +92,8 @@ class Store:
         ttl = max(1, math.ceil(session.expires_at - time.time()))
         await self.metadata.set(
             "session:" + session.id,
-            json.dumps({"auth_hash": session.auth_hash, "expires_at": session.expires_at}),
+            json.dumps({"auth_hash": session.auth_hash, "expires_at": session.expires_at,
+                        "state": session.state, "revision": session.revision}),
             ttl,
         )
 

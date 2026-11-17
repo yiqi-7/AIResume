@@ -11,7 +11,7 @@ from app.metadata import Metadata
 from app.schemas import Candidate, Problem, Session
 from tests.test_documents import make_docx
 
-JD = "能够进行需求分析，并将需求转化为产品原型。与设计和研发同学沟通需求。"
+JD = "能够进行需求分析，并将需求转化为产品原型。与设计和研发同学沟通需求。具备清晰的书面表达与协作能力。"
 
 
 def sample():
