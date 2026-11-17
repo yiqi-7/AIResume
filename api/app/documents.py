@@ -16,13 +16,32 @@ TEMPLATE = json.loads(
 )
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 SECTION_NAMES = [
-    ("education", r"教育|学历|education"),
-    ("experience", r"实习|工作经历|工作经验|任职|experience|employment"),
-    ("projects", r"项目|project"),
-    ("skills", r"技能|证书|skills|certificat"),
-    ("contact", r"基本信息|个人信息|contact"),
-    ("other", r"自我评价|个人评价|荣誉|其他|summary|awards"),
+    ("education", {"教育", "教育背景", "教育经历", "教育信息", "学历", "学历背景", "学历信息",
+                   "education", "educationalbackground"}),
+    ("experience", {"实习", "实习经历", "实习经验", "工作", "工作经历", "工作经验", "任职经历",
+                    "实习与工作经历", "工作与实习经历", "职业经历", "experience", "workexperience",
+                    "internshipexperience", "employment", "employmenthistory"}),
+    ("projects", {"项目", "项目经历", "项目经验", "科研经历", "科研项目", "project", "projects",
+                  "projectexperience", "selectedprojects"}),
+    ("skills", {"技能", "证书", "个人技能", "专业技能", "相关技能", "技术技能", "技能特长",
+                "技能证书", "技能与证书", "skills", "technicalskills", "certification",
+                "certifications"}),
+    ("contact", {"基本信息", "个人信息", "联系方式", "联系信息", "contact", "contactinformation"}),
+    ("other", {"自我评价", "个人评价", "个人简介", "校园经历", "荣誉", "荣誉奖项", "获奖情况",
+               "其他", "summary", "awards", "honors"}),
 ]
+
+
+def paragraph_text(paragraph) -> str:
+    pieces = []
+    for element in paragraph.iter():
+        if element.tag == W + "t":
+            pieces.append(element.text or "")
+        elif element.tag == W + "tab":
+            pieces.append("\t")
+        elif element.tag in {W + "br", W + "cr"}:
+            pieces.append("\n")
+    return "".join(pieces)
 
 
 def parse_docx(raw: bytes) -> Resume:
@@ -47,6 +66,12 @@ def parse_docx(raw: bytes) -> Resume:
                 if name.endswith(".rels"):
                     SafeET.fromstring(archive.read(name))
             warnings = []
+            for name in names:
+                if re.fullmatch(r"word/(?:header|footer)\d+\.xml", name):
+                    story = SafeET.fromstring(archive.read(name))
+                    if any((element.text or "").strip() for element in story.iter(W + "t")):
+                        warnings.append("页眉或页脚中的文字未作为简历正文读取；请核对姓名与联系方式，必要时放入正文后重传。")
+                        break
             if root.findall(".//" + W + "txbxContent"):
                 raise Problem(
                     "TEXTBOX_UNSUPPORTED",
@@ -87,7 +112,7 @@ def parse_docx(raw: bytes) -> Resume:
                 for row in child.findall(W + "tr"):
                     cells = []
                     for cell in row.findall(W + "tc"):
-                        cells.append(" ".join(t.text or "" for t in cell.iter(W + "t")))
+                        cells.append("\n".join(paragraph_text(p) for p in cell.iter(W + "p")))
                     text = " | ".join(c.strip() for c in cells if c.strip())
                     if text:
                         block_index += 1
@@ -96,16 +121,21 @@ def parse_docx(raw: bytes) -> Resume:
                         )
                 continue
             else:
+                if any((element.text or "").strip() for element in child.iter(W + "t")):
+                    raise Problem(
+                        "STRUCTURE_UNSUPPORTED",
+                        "检测到当前无法完整读取的正文结构，请转换为普通段落或表格后重试。", 422,
+                    )
                 continue
             for paragraph in paragraphs:
-                text = "".join(t.text or "" for t in paragraph.iter(W + "t")).strip()
+                text = paragraph_text(paragraph).strip()
                 if not text:
                     continue
                 if len(text) > 12000:
                     raise Problem("PARAGRAPH_TOO_LONG", "单段文字过长，请先整理简历内容。", 422)
                 heading_kind = next(
-                    (kind for kind, pattern in SECTION_NAMES
-                     if len(text) <= 22 and re.search(pattern, text, re.I)), None
+                    (kind for kind, names in SECTION_NAMES
+                     if re.sub(r"\s+", "", text).strip(":：").casefold() in names), None
                 )
                 if heading_kind:
                     sections.append(

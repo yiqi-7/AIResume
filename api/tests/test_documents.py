@@ -78,3 +78,55 @@ def test_table_rows_are_preserved_in_source_order():
     assert blocks[-2].text == "测试大学 | 计算机科学"
     assert blocks[-1].text == "表格之后的说明"
     assert any("表格" in warning for warning in resume.warnings)
+
+
+def test_short_fact_lines_are_not_misclassified_as_section_headings():
+    doc = Document(io.BytesIO(make_docx()))
+    facts = ["参与教育产品项目研发", "熟悉办公软件，具备数据分析技能", "拥有英语六级证书"]
+    for text in facts:
+        doc.add_paragraph(text)
+    doc.add_heading("专业技能", level=1)
+    doc.add_paragraph("Python、SQL 与需求文档整理")
+    output = io.BytesIO()
+    doc.save(output)
+
+    resume = parse_docx(output.getvalue())
+
+    extracted = [block.text for section in resume.sections for block in section.blocks]
+    assert all(text in extracted for text in facts)
+    assert resume.sections[-1].kind == "skills"
+    assert resume.sections[-1].blocks[0].text == "Python、SQL 与需求文档整理"
+
+
+def test_runs_tabs_and_line_breaks_preserve_facts_in_body_and_table():
+    doc = Document(io.BytesIO(make_docx()))
+    paragraph = doc.add_paragraph()
+    paragraph.add_run("2023\t2024\n负责需求整理")
+    cell = doc.add_table(rows=1, cols=1).cell(0, 0)
+    cell.paragraphs[0].add_run("20")
+    cell.paragraphs[0].add_run("24 年 · Py")
+    cell.paragraphs[0].add_run("thon")
+    output = io.BytesIO()
+    doc.save(output)
+
+    resume = parse_docx(output.getvalue())
+
+    extracted = [block.text for section in resume.sections for block in section.blocks]
+    assert "2023\t2024\n负责需求整理" in extracted
+    assert "2024 年 · Python" in extracted
+
+
+def test_header_text_omission_is_disclosed_and_unknown_body_text_is_rejected():
+    doc = Document(io.BytesIO(make_docx()))
+    doc.sections[0].header.paragraphs[0].text = "虚构姓名 · fictional@example.invalid"
+    output = io.BytesIO()
+    doc.save(output)
+    assert any("页眉或页脚" in warning for warning in parse_docx(output.getvalue()).warnings)
+    raw = make_docx()
+    with zipfile.ZipFile(io.BytesIO(raw)) as package:
+        xml = package.read("word/document.xml")
+    unknown = (b'<w:sdt><w:sdtContent><w:p><w:r><w:t>preserve this fact</w:t>'
+               b'</w:r></w:p></w:sdtContent></w:sdt>')
+    with pytest.raises(Problem, match="STRUCTURE_UNSUPPORTED"):
+        parse_docx(replace_part(raw, "word/document.xml", xml.replace(b"<w:body>",
+                                                                     b"<w:body>" + unknown)))
