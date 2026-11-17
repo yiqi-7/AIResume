@@ -1,0 +1,26 @@
+---
+import '@fontsource-variable/noto-sans-sc';
+import '../styles/global.css';
+interface Props { title: string; description?: string; noindex?: boolean; }
+const { title, description = '根据目标岗位检查简历，查看原文依据，逐条决定如何修改。免注册，导出可编辑 DOCX。', noindex = false } = Astro.props;
+const canonical = new URL(Astro.url.pathname, Astro.site);
+---
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    {noindex && <meta name="robots" content="noindex, nofollow" />}
+    <meta name="theme-color" content="#f6f8fc" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="canonical" href={canonical} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={new URL('/og.png', Astro.site)} />
+    <title>{title}</title>
+  </head>
+  <body><a class="skip-link" href="#main">跳到主要内容</a><slot /></body>
+</html>
