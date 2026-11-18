@@ -21,6 +21,7 @@ The interface and analysis prompts are currently primarily in Chinese.
 - **Choose your model service**: See the site-provided model ID, use a built-in provider or custom API, fetch available models, save multiple model IDs, and switch the model used for an analysis.
 - **No account required**: Start without registering, or explore a fictional demo that makes no model calls.
 - **Text scaling and small screens**: Interface text follows user font-size settings, headings and controls can reflow, and model input handles Chinese IME confirmation safely.
+- **A focused interface**: The settings control shows the active model. Columns, spacing, and selection states organize the content with fewer repeated labels; advanced options expand on demand.
 
 ## How to use
 
@@ -31,7 +32,7 @@ The interface and analysis prompts are currently primarily in Chinese.
 
 ## Model services
 
-Open **模型设置** (Model settings) in the upper-right corner of the workspace. You can use the site-provided model, enter your own DeepSeek API key, or connect another service through a custom API. Enter a name, API base URL, and API key, then fetch or enter the model to use. Internal identifiers are generated automatically. Protocol selection is under Advanced settings. Supported protocols are OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages.
+Click the model name in the upper-right corner of the workspace to open model settings. You can use the site-provided model, enter your own DeepSeek API key, or connect another service through a custom API. Enter a name, API base URL, and API key, then fetch or enter the model to use. Internal identifiers are generated automatically. Protocol selection is under Advanced settings. Supported protocols are OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages.
 
 Each browser can persistently save up to **3 custom API configurations**, with editing, deletion, and switching supported. A configuration can contain multiple models. Click a model in the list to make it the default; when using the configuration, you can select another model or enter an ID outside the saved list. API URLs must use public HTTPS endpoints. If model discovery is unavailable, enter a model name directly or expand the manual model section to maintain a list. Configurations and keys stay in the current browser and do not sync across browsers or devices. During a request, the key is temporarily passed to the backend; it is not written to server-side sessions, files, or logs.
 
