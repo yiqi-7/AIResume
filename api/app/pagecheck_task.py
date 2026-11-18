@@ -12,6 +12,8 @@ from defusedxml import ElementTree as SafeET
 from pypdf import PdfReader
 
 from .documents import W, parse_docx
+from .pdf_documents import parse_pdf
+from .schemas import Problem
 
 PROFILE = '''<?xml version="1.0" encoding="UTF-8"?>
 <oor:items xmlns:oor="http://openoffice.org/2001/registry">
@@ -86,33 +88,53 @@ def has_active_content(raw: bytes) -> bool:
     return False
 
 
-def run(directory: Path) -> int:
-    raw = (directory / "source.docx").read_bytes()
-    # Bound and validate the ZIP/XML before exposing it to the layout engine.
-    parse_docx(raw)
-    if has_active_content(raw):
-        return 4
+def convert(directory: Path, source: Path, target: str) -> Path:
     profile = directory / "profile"
-    profile.mkdir()
+    profile.mkdir(exist_ok=True)
     (profile / "registrymodifications.xcu").write_text(PROFILE, encoding="utf-8")
     output = directory / "output"
-    output.mkdir()
+    output.mkdir(exist_ok=True)
     result = subprocess.run(
         ["/usr/bin/libreoffice", "-env:UserInstallation=" + profile.as_uri(),
          "--headless", "--invisible", "--nologo", "--nodefault", "--nolockcheck", "--norestore",
-         "--convert-to",
-         'pdf:writer_pdf_Export:{"IsSkipEmptyPages":{"type":"boolean","value":"false"}}',
-         "--outdir", str(output), str(directory / "source.docx")],
+         "--convert-to", target,
+         "--outdir", str(output), str(source)],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         check=False,
     )
-    pdf = output / "source.pdf"
-    if result.returncode or not pdf.is_file():
-        return 3
+    converted = output / (source.stem + "." + target.split(":", 1)[0])
+    if result.returncode or not converted.is_file():
+        raise ValueError("Conversion failed")
+    return converted
+
+
+def run(directory: Path) -> int:
+    extracting = (directory / "extract").exists()
+    if (directory / "source.pdf").exists():
+        resume = parse_pdf((directory / "source.pdf").read_bytes())
+        (directory / "result.json").write_text(resume.model_dump_json(), encoding="utf-8")
+        print(resume.rendered_pages, flush=True)
+        return 0
+    source = directory / "source.docx"
+    if (directory / "source.doc").exists():
+        source = convert(directory, directory / "source.doc", "docx:Office Open XML Text")
+        if source.stat().st_size > 40 * 1024 * 1024:
+            return 3
+    raw = source.read_bytes()
+    # Bound and validate the ZIP/XML before exposing it to the layout engine.
+    resume = parse_docx(raw)
+    if has_active_content(raw):
+        return 4
+    pdf = convert(directory, source,
+                  'pdf:writer_pdf_Export:{"IsSkipEmptyPages":{"type":"boolean","value":"false"}}')
     with pdf.open("rb") as file:
         pages = len(PdfReader(file, strict=True).pages)
     if pages < 1:
         return 3
+    if extracting:
+        resume.rendered_pages, resume.page_count_verified = pages, True
+        resume.warnings.append("旧版 DOC 已转换后读取；请核对文本框、表格及经历顺序。")
+        (directory / "result.json").write_text(resume.model_dump_json(), encoding="utf-8")
     print(pages, flush=True)
     return 0
 
@@ -122,6 +144,9 @@ if __name__ == "__main__":
     logging.disable(logging.CRITICAL)
     try:
         exit_code = run(Path(sys.argv[1]))
+    except Problem as exc:
+        (Path(sys.argv[1]) / "error.txt").write_text(exc.code, encoding="ascii")
+        exit_code = 3
     except Exception:
         exit_code = 3
     raise SystemExit(exit_code)

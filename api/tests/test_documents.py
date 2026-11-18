@@ -51,19 +51,65 @@ def test_parse_round_trip_and_source_is_untouched():
     assert parse_docx(raw).sections[1].kind == "projects"
 
 
-def test_reject_invalid_zip_and_textboxes_but_do_not_trust_page_metadata():
+def test_reject_invalid_zip_but_do_not_trust_page_metadata():
     with pytest.raises(Problem, match="INVALID_DOCX"):
         parse_docx(b"not a docx")
     raw = make_docx()
     with zipfile.ZipFile(io.BytesIO(raw)) as source:
-        xml = source.read("word/document.xml")
         app = source.read("docProps/app.xml")
-    with pytest.raises(Problem, match="TEXTBOX_UNSUPPORTED"):
-        parse_docx(replace_part(raw, "word/document.xml", xml.replace(
-            b"<w:body>", b"<w:body><w:p><w:txbxContent/></w:p>")))
     resume = parse_docx(replace_part(raw, "docProps/app.xml", app.replace(b"<Pages>1</Pages>",
                                                                       b"<Pages>99</Pages>")))
     assert resume.estimated_pages == 99 and not resume.page_count_verified
+
+
+def textbox_xml():
+    return ('<w:p><w:r><w:pict><v:shape xmlns:v="urn:schemas-microsoft-com:vml" '
+            'id="resume-box" style="width:300pt;height:100pt"><v:textbox><w:txbxContent>'
+            '<w:p><w:r><w:t>陈测试 · fictional@example.invalid</w:t></w:r></w:p>'
+            '<w:p><w:r><w:t>2024 年 Python / SQL，项目效率提升 20%</w:t></w:r></w:p>'
+            '</w:txbxContent></v:textbox></v:shape></w:pict></w:r></w:p>').encode()
+
+
+def make_textbox_docx():
+    raw = make_docx()
+    with zipfile.ZipFile(io.BytesIO(raw)) as package:
+        xml = package.read("word/document.xml")
+    return replace_part(raw, "word/document.xml", xml.replace(b"<w:body>",
+                                                               b"<w:body>" + textbox_xml()))
+
+
+def test_textboxes_keep_paragraphs_facts_and_source_anchor_order():
+    resume = parse_docx(make_textbox_docx())
+    texts = [b.text for s in resume.sections for b in s.blocks]
+    assert texts[:3] == ["陈测试 · fictional@example.invalid",
+                         "2024 年 Python / SQL，项目效率提升 20%", "陈同学"]
+    assert any("文本框" in warning for warning in resume.warnings)
+
+
+def test_alternate_content_chooses_one_textbox_representation_without_duplicates():
+    raw = make_docx()
+    with zipfile.ZipFile(io.BytesIO(raw)) as package:
+        xml = package.read("word/document.xml")
+    box = textbox_xml()
+    alternate = (b'<mc:AlternateContent><mc:Choice Requires="wps">' + box
+                 + b'</mc:Choice><mc:Fallback>' + box + b'</mc:Fallback></mc:AlternateContent>')
+    resume = parse_docx(replace_part(raw, "word/document.xml", xml.replace(
+        b"<w:body>", b"<w:body>" + alternate)))
+    texts = [b.text for s in resume.sections for b in s.blocks]
+    assert texts.count("陈测试 · fictional@example.invalid") == 1
+    assert texts.count("2024 年 Python / SQL，项目效率提升 20%") == 1
+
+
+def test_textbox_nested_in_table_does_not_repeat_nested_paragraphs():
+    raw = make_docx()
+    with zipfile.ZipFile(io.BytesIO(raw)) as package:
+        xml = package.read("word/document.xml")
+    table = b'<w:tbl><w:tr><w:tc>' + textbox_xml() + b'</w:tc></w:tr></w:tbl>'
+    resume = parse_docx(replace_part(raw, "word/document.xml", xml.replace(
+        b"<w:body>", b"<w:body>" + table)))
+    text = "\n".join(b.text for s in resume.sections for b in s.blocks)
+    assert text.count("陈测试") == 1
+    assert "fictional@example.invalid\n2024 年 Python / SQL" in text
 
 
 def test_table_rows_are_preserved_in_source_order():

@@ -1,5 +1,5 @@
 [Unit]
-Description=AIResume isolated DOCX pagination
+Description=AIResume isolated document extraction and pagination
 Requires=airesume-pagecheck.socket
 After=airesume-pagecheck.socket
 

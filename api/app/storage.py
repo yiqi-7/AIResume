@@ -145,6 +145,8 @@ class Store:
                 await self.metadata.reserve_session()
                 reserved = True
                 directory.mkdir(mode=0o700)
+                # Historical internal name; payload may now be DOCX, DOC or PDF.
+                # Keep it stable so existing key checks and migrations cover all uploads.
                 self._write_private(directory / "raw.docx", raw)
                 self._write(session)
                 await self.save_metadata(session)

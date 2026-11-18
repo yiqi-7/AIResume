@@ -1,6 +1,6 @@
 # AIResume · 叙职
 
-上传 DOCX 与目标岗位描述，核对建议、编辑简历并导出 Word 文档。
+上传 Word（DOC / DOCX，含文本框）或可复制文字的 PDF 与目标岗位描述，核对建议、编辑简历并导出 Word 文档。
 
 需要 Node.js 24、Python 3.12 和 uv。
 
@@ -22,7 +22,7 @@ uv sync --group dev
 
 真实上传还需要 Linux 隔离排版服务：安装 LibreOffice Writer、Noto CJK 字体，创建独立 `airesume-render` 用户/组，使用 `deploy/airesume-pagecheck.socket` 与 `.service`（默认代码路径 `/opt/airesume`，SocketGroup 为 API 的 `airesume` 组）。渲染用户不要加入 API 组；API 配置与会话须禁止其他用户读取。安装两个 unit 后启用 socket。服务限制单并发、384 MB 内存、无 swap、96 MB 临时内存盘和 30 秒任务时限；生产发布前需验证目标机器资源余量。
 
-页数以服务器 LibreOffice 的完整 PDF 排版为准，上限 8 页，可能与本机 Word 不同。隔离服务缺失或校验失败时不保存上传。Windows 本地可查看虚构示例；浏览器 QA 使用模拟页数服务，真实隔离服务由 Ubuntu 集成测试验证。
+Word 页数以服务器 LibreOffice 的完整排版为准，可能与本机 Word 不同；PDF 读取原文件页数与文字层，不支持扫描件或图片型 PDF。两者均上限 8 页、5 MB。旧版 DOC 转换及 PDF 提取在同一受限隔离进程中运行。隔离服务缺失或校验失败时不保存上传。Windows 本地可查看虚构示例；浏览器 QA 使用模拟页数服务，真实隔离服务由 Ubuntu 集成测试验证。
 
 ```powershell
 cd api

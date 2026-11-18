@@ -135,7 +135,7 @@ async def test_upload_boundaries_csrf_and_no_secrets_in_errors(client):
     ("too_large_jd", "JD_TOO_LONG"),
     ("short_jd", "JD_TOO_SHORT"),
     ("no_consent", "CONSENT_REQUIRED"),
-    ("unsupported_file", "INVALID_DOCX"),
+    ("unsupported_file", "FORMAT_MISMATCH"),
 ])
 async def test_upload_rejections_leave_no_private_files(client, case, expected_code):
     c, app = client

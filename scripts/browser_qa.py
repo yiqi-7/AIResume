@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import urllib.request
@@ -136,19 +137,18 @@ def main():
 
             page.goto("http://127.0.0.1:4322/app/", wait_until="networkidle")
             capture("upload-desktop")
-            from docx import Document
-            doc = Document()
-            doc.add_paragraph("陈同学")
-            doc.add_paragraph("应届毕业生，求职方向为产品经理，以下均为虚构测试内容。")
-            doc.add_heading("项目经历", level=1)
-            doc.add_paragraph("访谈同学并整理需求，梳理发布和检索流程，完成平台原型。")
+            sys.path.insert(0, str(ROOT / "api"))
+            from tests.test_documents import make_textbox_docx
+            from tests.test_pdf_documents import make_pdf
+
             sample = OUT / "fictional.docx"
-            doc.save(sample)
-            page.get_by_label("选择 DOCX 简历").set_input_files(str(sample))
+            sample.write_bytes(make_textbox_docx())
+            page.get_by_label("选择 Word 或 PDF 简历").set_input_files(str(sample))
             page.get_by_label("目标岗位描述").fill("能够进行需求分析，并将需求转化为产品原型。与设计和研发同学沟通需求。具备清晰的书面表达与协作能力。")
             page.get_by_role("checkbox").check()
             page.get_by_role("button", name="读取简历", exact=True).click()
             expect(page.get_by_role("heading", name="先确认，读对了没有。")).to_be_visible()
+            expect(page.get_by_text("陈测试 · fictional@example.invalid", exact=True)).to_be_visible()
             capture("parsed-desktop")
             page.get_by_role("button", name="读取无误，开始分析").click()
             expect(page.get_by_role("heading", name="从一条具体的修改开始。")).to_be_visible(timeout=20000)
@@ -194,6 +194,18 @@ def main():
             expect(page.get_by_text("下载已发起", exact=False)).to_be_visible()
             expect(page.get_by_role("heading", name="先放入你的简历。")).to_be_visible()
             assert page.request.get("http://127.0.0.1:4322/api/session").json()["session"] is None
+            pdf = OUT / "fictional.pdf"
+            pdf.write_bytes(make_pdf())
+            page.get_by_label("选择 Word 或 PDF 简历").set_input_files(str(pdf))
+            page.get_by_label("目标岗位描述").fill("能够进行需求分析，并将需求转化为产品原型。与设计和研发同学沟通需求。具备清晰的书面表达与协作能力。")
+            page.get_by_role("checkbox").check()
+            page.get_by_role("button", name="读取简历", exact=True).click()
+            expect(page.get_by_role("heading", name="先确认，读对了没有。")).to_be_visible()
+            expect(page.get_by_text("Fictional Candidate - 2024 - fictional@example.invalid", exact=True)).to_be_visible()
+            capture("pdf-parsed-mobile")
+            page.get_by_role("button", name="结束会话", exact=True).click()
+            page.get_by_role("button", name="确认结束", exact=True).click()
+            expect(page.get_by_role("heading", name="先放入你的简历。")).to_be_visible()
             assert not any((ROOT / ".local" / "qa-sessions").iterdir())
             assert errors == [], errors
             context.close()

@@ -15,6 +15,7 @@ TEMPLATE = json.loads(
     (Path(__file__).resolve().parents[2] / "shared" / "template.json").read_text()
 )
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+MC = "{http://schemas.openxmlformats.org/markup-compatibility/2006}"
 SECTION_NAMES = [
     ("education", {"教育", "教育背景", "教育经历", "教育信息", "学历", "学历背景", "学历信息",
                    "education", "educationalbackground"}),
@@ -32,21 +33,104 @@ SECTION_NAMES = [
 ]
 
 
-def paragraph_text(paragraph) -> str:
+def visible_children(element):
+    """Use one textual AlternateContent representation, never both copies."""
+    for child in element:
+        if child.tag == MC + "AlternateContent":
+            choices = list(child)
+            chosen = next((c for c in choices if c.find(".//" + W + "txbxContent")
+                           is not None), None)
+            if chosen is None:
+                chosen = choices[0] if choices else None
+            if chosen is not None:
+                yield from visible_children(chosen)
+        else:
+            yield child
+
+
+def paragraph_parts(paragraph):
+    """Split anchored text boxes into paragraphs at their XML anchor position."""
     pieces = []
-    for element in paragraph.iter():
-        if element.tag == W + "t":
-            pieces.append(element.text or "")
-        elif element.tag == W + "tab":
-            pieces.append("\t")
-        elif element.tag in {W + "br", W + "cr"}:
-            pieces.append("\n")
-    return "".join(pieces)
+
+    def walk(element):
+        for child in visible_children(element):
+            if child.tag == W + "txbxContent":
+                if pieces:
+                    yield "".join(pieces), False
+                    pieces.clear()
+                yield from story_parts(child)
+            elif child.tag == W + "t":
+                pieces.append(child.text or "")
+            elif child.tag == W + "tab":
+                pieces.append("\t")
+            elif child.tag in {W + "br", W + "cr"}:
+                pieces.append("\n")
+            else:
+                yield from walk(child)
+
+    yield from walk(paragraph)
+    if pieces:
+        yield "".join(pieces), paragraph.find(".//" + W + "numPr") is not None
+
+
+def story_parts(story):
+    for child in visible_children(story):
+        if child.tag == W + "p":
+            yield from paragraph_parts(child)
+        elif child.tag == W + "tbl":
+            for row in child.findall(W + "tr"):
+                cells = ["\n".join(text.strip() for text, _ in story_parts(cell)
+                                   if text.strip()) for cell in row.findall(W + "tc")]
+                yield " | ".join(cell for cell in cells if cell), False
+        elif any((node.text or "").strip() for node in child.iter(W + "t")):
+            raise Problem("STRUCTURE_UNSUPPORTED",
+                          "检测到当前无法完整读取的正文结构，请转换为普通段落或表格后重试。", 422)
+
+
+def resume_from_parts(parts, warnings=None, estimated_pages=None):
+    sections = [Section(id="sec_contact", kind="contact", title="基本信息", blocks=[])]
+    block_index, total = 0, 0
+    for text, is_bullet in parts:
+        text = text.strip()
+        if not text:
+            continue
+        if len(text) > 12000:
+            raise Problem("PARAGRAPH_TOO_LONG", "单段文字过长，请先整理简历内容。", 422)
+        total += len(text)
+        if total > 30000:
+            raise Problem("CONTEXT_TOO_LONG", "简历文字超过处理范围，请精简后重试；系统不会静默截断。", 422)
+        heading_kind = next(
+            (kind for kind, names in SECTION_NAMES
+             if re.sub(r"\s+", "", text).strip(":：").casefold() in names), None
+        )
+        if heading_kind:
+            sections.append(Section(id=f"sec_{len(sections)}", kind=heading_kind,
+                                    title=text, blocks=[]))
+        else:
+            block_index += 1
+            sections[-1].blocks.append(Block(id=f"b{block_index}", text=text,
+                                            kind="bullet" if is_bullet else "paragraph"))
+    if sum(len(b.text) for s in sections for b in s.blocks) < 40:
+        raise Problem("EMPTY_RESUME", "读取到的文字太少，请确认文件中包含可选择的简历正文。", 422)
+    return Resume(sections=[s for s in sections if s.blocks],
+                  warnings=list(dict.fromkeys(warnings or [])), estimated_pages=estimated_pages)
+
+
+def upload_format(name: str, raw: bytes) -> str:
+    suffix = Path(name).suffix.casefold()
+    if suffix not in {".docx", ".doc", ".pdf"}:
+        raise Problem("UNSUPPORTED_FORMAT", "请上传 DOC、DOCX 或可复制文字的 PDF 文件。", 415)
+    matches = {".docx": raw.startswith(b"PK\x03\x04"),
+               ".doc": raw.startswith(bytes.fromhex("d0cf11e0a1b11ae1")),
+               ".pdf": raw.startswith(b"%PDF-")}
+    if not matches[suffix]:
+        raise Problem("FORMAT_MISMATCH", "文件内容与扩展名不符，请使用 Word 或 PDF 的原始文件重新上传。", 415)
+    return suffix[1:]
 
 
 def parse_docx(raw: bytes) -> Resume:
     if not zipfile.is_zipfile(io.BytesIO(raw)):
-        raise Problem("INVALID_DOCX", "请上传未加密的 DOCX 文件；暂不支持 PDF、DOC 或图片。", 415)
+        raise Problem("INVALID_DOCX", "请上传有效且未加密的 DOCX 文件。", 415)
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
             entries = archive.infolist()
@@ -86,15 +170,11 @@ def parse_docx(raw: bytes) -> Resume:
                         warnings.append("页眉或页脚中的文字未作为简历正文读取；请核对姓名与联系方式，必要时放入正文后重传。")
                         break
             if root.findall(".//" + W + "txbxContent"):
-                raise Problem(
-                    "TEXTBOX_UNSUPPORTED",
-                    "检测到文本框，可能无法完整读取。请将文本框内容粘贴为普通正文后重新上传。",
-                    422,
-                )
+                warnings.append("已读取文本框内容，按其在正文中的锚点排列；请核对姓名、联系方式与经历顺序。")
             columns = root.findall(".//" + W + "cols")
             if any(int(c.attrib.get(W + "num", "1")) > 1 for c in columns):
                 warnings.append("原简历使用分栏，请核对提取顺序；导出会统一为单栏。")
-            if root.findall(".//" + W + "drawing"):
+            if root.findall(".//" + W + "drawing") or root.findall(".//" + W + "pict"):
                 warnings.append("图片和照片不会进入导出文件，请确认经历信息均已写在正文里。")
             page_estimate = None
             if "docProps/app.xml" in names:
@@ -102,65 +182,12 @@ def parse_docx(raw: bytes) -> Resume:
                 for element in app.iter():
                     if element.tag.endswith("}Pages") and (element.text or "").isdigit():
                         page_estimate = int(element.text)
-        # Load with python-docx only after bounding the decompressed package.
-        doc = Document(io.BytesIO(raw))
-        sections = [Section(id="sec_contact", kind="contact", title="基本信息", blocks=[])]
-        block_index = 0
-        for child in doc.element.body:
-            if child.tag == W + "p":
-                paragraphs = [child]
-            elif child.tag == W + "tbl":
-                warnings.append("已将表格内容按行提取；请核对单位、日期与经历的对应关系。")
-                paragraphs = []
-                for row in child.findall(W + "tr"):
-                    cells = []
-                    for cell in row.findall(W + "tc"):
-                        cells.append("\n".join(paragraph_text(p) for p in cell.iter(W + "p")))
-                    text = " | ".join(c.strip() for c in cells if c.strip())
-                    if text:
-                        block_index += 1
-                        sections[-1].blocks.append(
-                            Block(id=f"b{block_index}", text=text, kind="paragraph")
-                        )
-                continue
-            else:
-                if any((element.text or "").strip() for element in child.iter(W + "t")):
-                    raise Problem(
-                        "STRUCTURE_UNSUPPORTED",
-                        "检测到当前无法完整读取的正文结构，请转换为普通段落或表格后重试。", 422,
-                    )
-                continue
-            for paragraph in paragraphs:
-                text = paragraph_text(paragraph).strip()
-                if not text:
-                    continue
-                if len(text) > 12000:
-                    raise Problem("PARAGRAPH_TOO_LONG", "单段文字过长，请先整理简历内容。", 422)
-                heading_kind = next(
-                    (kind for kind, names in SECTION_NAMES
-                     if re.sub(r"\s+", "", text).strip(":：").casefold() in names), None
-                )
-                if heading_kind:
-                    sections.append(
-                        Section(id=f"sec_{len(sections)}", kind=heading_kind,
-                                title=text, blocks=[])
-                    )
-                else:
-                    block_index += 1
-                    is_bullet = paragraph.find(".//" + W + "numPr") is not None
-                    sections[-1].blocks.append(
-                        Block(id=f"b{block_index}", text=text,
-                              kind="bullet" if is_bullet else "paragraph")
-                    )
-        if sum(len(b.text) for s in sections for b in s.blocks) < 40:
-            raise Problem("EMPTY_RESUME", "读取到的文字太少，请确认文件中包含可选择的简历正文。", 422)
-        if not doc.paragraphs and not doc.tables:
-            raise Problem("EMPTY_RESUME", "没有读取到简历正文。", 422)
-        return Resume(
-            sections=[s for s in sections if s.blocks],
-            warnings=list(dict.fromkeys(warnings)),
-            estimated_pages=page_estimate,
-        )
+        if root.find(".//" + W + "tbl") is not None:
+            warnings.append("已将表格内容按行提取；请核对单位、日期与经历的对应关系。")
+        body = root.find(W + "body")
+        if body is None:
+            raise ValueError("Missing body")
+        return resume_from_parts(story_parts(body), warnings, page_estimate)
     except Problem:
         raise
     except (zipfile.BadZipFile, KeyError, ValueError, etree.XMLSyntaxError):
