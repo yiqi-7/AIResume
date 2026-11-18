@@ -95,7 +95,7 @@ async def test_bad_key_is_not_retried_or_reflected():
 
 
 async def test_missing_station_and_byok_allowlist_and_fact_answer():
-    settings = Settings()
+    settings = Settings(_env_file=None, llm_base_url="", llm_model="", llm_api_key=SecretStr(""))
     client = ModelClient(settings, Metadata(settings), httpx.MockTransport(
         lambda req: response(json.dumps({"rewrite": "整理用户反馈，与同学核对原型。"}))))
     session, candidate = sample()

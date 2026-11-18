@@ -149,7 +149,10 @@ def paged_docx(pages: int, metadata: int | None = 1):
     for index in range(pages):
         if index:
             doc.add_page_break()
-        doc.add_paragraph(f"第 {index + 1} 页 · 以下均为虚构测试材料。参与校园项目需求分析、访谈与原型设计。")
+        doc.add_paragraph(
+            f"第 {index + 1} 页 · 以下均为虚构测试材料。参与校园项目需求分析、访谈与原型设计。"
+            "根据同学反馈整理使用流程，与设计同学核对页面信息和交互细节。"
+        )
     output = io.BytesIO()
     doc.save(output)
     raw = output.getvalue()
