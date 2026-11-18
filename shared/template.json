@@ -1,0 +1,17 @@
+{
+  "pageWidthMm": 210,
+  "pageHeightMm": 297,
+  "marginMm": 20,
+  "namePt": 18,
+  "headingPt": 12,
+  "bodyPt": 10.5,
+  "lineHeight": 1.15,
+  "sectionOrder": [
+    "contact",
+    "education",
+    "experience",
+    "projects",
+    "skills",
+    "other"
+  ]
+}

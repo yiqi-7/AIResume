@@ -1,0 +1,128 @@
+name: Acceptance checks
+
+on:
+  push:
+    branches: [main, 'feature/**', 'fix/**', 'chore/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: acceptance-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: '0.11.28'
+          python-version: '3.12'
+      - name: Install Python dependencies
+        working-directory: api
+        run: uv sync --locked --group dev --group qa --python /usr/bin/python3.12
+      - name: Install isolated proxy and pagination dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y nginx-core libreoffice-writer fonts-noto-cjk
+      - name: Start real pagination sandbox using the production unit templates
+        run: |
+          sudo useradd --system --no-create-home --shell /usr/sbin/nologin airesume-render
+          sudo install -d /opt/airesume/api /opt/airesume/shared
+          sudo cp -a api/app api/.venv /opt/airesume/api/
+          sudo cp shared/template.json /opt/airesume/shared/
+          sudo chmod -R a+rX /opt/airesume
+          python - <<'PY'
+          import os
+          import subprocess
+          from pathlib import Path
+          root = Path(os.environ['GITHUB_WORKSPACE'])
+          for suffix in ('socket', 'service'):
+              text = (root / 'deploy' / f'airesume-pagecheck.{suffix}').read_text()
+              # Use exactly the service sandbox; only the API client's group differs in CI.
+              text = text.replace('SocketGroup=airesume\n', 'SocketGroup=runner\n')
+              subprocess.run(['sudo', 'tee', f'/etc/systemd/system/airesume-pagecheck.{suffix}'],
+                             input=text.encode(), stdout=subprocess.DEVNULL, check=True)
+          PY
+          sudo systemctl daemon-reload
+          # Capture namespace setup errors emitted before the child's journal
+          # streams are available, then restore the hosted runner's log level.
+          sudo systemd-analyze log-level debug
+          trap 'sudo systemd-analyze log-level info' EXIT
+          sudo systemctl start airesume-pagecheck.socket
+          # Socket activation starts the service; its lifespan validates actual kernel limits.
+          api/.venv/bin/python - <<'PY'
+          import httpx
+          with httpx.Client(transport=httpx.HTTPTransport(uds='/run/airesume-pagecheck.sock'),
+                            base_url='http://pagecheck', timeout=30) as client:
+              result = client.get('/healthz')
+              result.raise_for_status()
+              assert result.json()['isolated']
+          PY
+      - name: Lint Python
+        working-directory: api
+        run: uv run ruff check app tests ../scripts/browser_qa.py ../deploy/generate_cloudflare_nginx.py
+      - name: Test API and isolated Redis
+        working-directory: api
+        env:
+          TEST_REDIS_URL: redis://127.0.0.1:6379/15
+          TEST_NGINX_PATH: /usr/sbin/nginx
+          TEST_PAGECHECK_SOCKET: /run/airesume-pagecheck.sock
+        run: uv run pytest -q
+      - name: Inspect pagination resource usage and service diagnostics
+        if: always()
+        run: |
+          sudo systemctl show airesume-pagecheck.service -p ActiveState -p MemoryPeak -p MemoryMax -p MemorySwapMax -p TasksMax -p NRestarts
+          sudo journalctl -u airesume-pagecheck.service --no-pager -n 500
+          sudo journalctl -b --no-pager --grep='airesume-pagecheck|mount namespacing' -n 120
+          sudo journalctl -b -p warning --no-pager --since '-5 minutes'
+      - name: Diagnose mount namespace failure without changing production limits
+        if: failure()
+        run: |
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+          keys = {'User', 'Group', 'PrivateNetwork', 'PrivateDevices', 'ProtectSystem',
+                  'ProtectHome', 'ProtectKernelTunables', 'ProtectKernelModules',
+                  'ProtectControlGroups', 'InaccessiblePaths', 'TemporaryFileSystem'}
+          properties = [line for line in Path('deploy/airesume-pagecheck.service').read_text().splitlines()
+                        if line.split('=', 1)[0] in keys]
+          for omitted in [None, *properties]:
+              command = ['sudo', 'systemd-run', '--wait', '--pipe', '--collect', '--quiet']
+              for prop in properties:
+                  if prop != omitted:
+                      command.extend(['--property', prop])
+              result = subprocess.run([*command, '/usr/bin/true'], capture_output=True, text=True, timeout=15)
+              print(f'omitted={omitted!r} exit={result.returncode}', flush=True)
+              print(result.stderr[-2000:], flush=True)
+          PY
+      - name: Install frontend dependencies
+        working-directory: web
+        run: npm ci
+      - name: Check frontend
+        working-directory: web
+        run: npm run check
+      - name: Build frontend
+        working-directory: web
+        run: npm run build
+      - name: Browser workflow against built frontend and simulated model
+        env:
+          BROWSER_QA_CHROME: /usr/bin/google-chrome
+        run: api/.venv/bin/python scripts/browser_qa.py

@@ -37,3 +37,13 @@ tmp/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local planning and collaboration documents
+/AGENTS.md
+/CONTRIBUTING.md
+/PRD.md
+/TECH-STACK.md
+/DESIGN-RECORD.md
+/IMPLEMENTATION.md
+/.github/ISSUE_TEMPLATE/
+/.github/pull_request_template.md

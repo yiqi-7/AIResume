@@ -1,0 +1,12 @@
+[Unit]
+Description=AIResume private pagination socket
+
+[Socket]
+ListenStream=/run/airesume-pagecheck.sock
+SocketUser=root
+SocketGroup=airesume
+SocketMode=0660
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target
