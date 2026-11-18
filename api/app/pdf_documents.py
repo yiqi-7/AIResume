@@ -49,7 +49,7 @@ def parse_pdf(raw: bytes):
                 raise Problem("PDF_TEXT_UNREADABLE", "PDF 的文字编码无法完整读取，请从原始 Word 重新导出 PDF。", 422)
             total += len(text)
             if total > 30000:
-                raise Problem("CONTEXT_TOO_LONG", "简历文字超过处理范围，请精简后重试；系统不会静默截断。", 422)
+                raise Problem("CONTEXT_TOO_LONG", "简历文字过多，请精简后重试。", 422)
             parts.extend((line, False) for line in text.splitlines())
         resume = resume_from_parts(parts, [
             "已读取 PDF 文字层，按页面位置提取；请核对分栏、表格、日期及换行顺序。",

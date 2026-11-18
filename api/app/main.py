@@ -243,13 +243,13 @@ def create_app(settings: Settings | None = None, model_transport=None, pagecheck
             if chars > settings.max_analysis_chars:
                 raise Problem(
                     "CONTEXT_TOO_LONG",
-                    "材料超出当前模型处理范围，请精简 JD 或简历；系统不会静默截断。", 422
+                    "内容过多，请精简岗位描述或简历后重试。", 422
                 )
             if format == "docx":
                 resume.rendered_pages = await pagecheck.count(bytes(raw))
             resume.page_count_verified = True
             if format != "pdf":
-                resume.warnings.append("页数按服务器排版结果校验，可能与本机 Word 的字体和分页不同。")
+                resume.warnings.append("文档分页可能与本机 Word 不同，请核对内容是否完整。")
             ip = request.client.host if request.client else "unknown"
             ip_key = hmac.new(
                 settings.ip_salt.get_secret_value().encode(), ip.encode(), hashlib.sha256
@@ -350,7 +350,7 @@ def create_app(settings: Settings | None = None, model_transport=None, pagecheck
                 if len(store.jobs) >= settings.max_active_jobs:
                     raise Problem("BUSY", "当前正在处理其他简历，请稍后重试。", 429)
                 if session.analysis_attempts >= 3:
-                    raise Problem("RETRY_LIMIT", "本次会话分析重试已达上限，请结束后重新开始。", 429)
+                    raise Problem("RETRY_LIMIT", "本次重试次数已用完，请清除本次资料后重新上传。", 429)
                 if not session.charged:
                     await metadata.reserve_analysis(session.ip_key, credentials[3])
                     session.charged = True
@@ -482,7 +482,7 @@ def create_app(settings: Settings | None = None, model_transport=None, pagecheck
                 raw = await asyncio.to_thread(export_docx, final_resume(session))
             except Exception:
                 await metadata.stat("export_failed")
-                raise Problem("EXPORT_FAILED", "文档生成失败，你的修改仍保留在会话中，请重试。", 503)
+                raise Problem("EXPORT_FAILED", "文档生成失败，已保留你的修改，请重试。", 503)
         await metadata.stat("export_succeeded")
         return Response(
             raw,
