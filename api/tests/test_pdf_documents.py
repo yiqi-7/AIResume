@@ -116,6 +116,20 @@ def test_unreadable_pdf_never_returns_partial_success(raw, code):
         parse_pdf(raw)
 
 
+@pytest.mark.parametrize("drawing", [b"q BI /W 1 /H 1 /BPC 8 /CS /RGB ID \x00\x00\x00 EI Q",
+                                     b"0 0 100 100 re S"])
+def test_nontext_page_with_inline_image_or_vector_content_is_not_silently_omitted(drawing):
+    writer = PdfWriter(io.BytesIO(make_pdf()))
+    page = writer.add_blank_page(width=595, height=842)
+    stream = DecodedStreamObject()
+    stream.set_data(drawing)
+    page[NameObject("/Contents")] = writer._add_object(stream)
+    output = io.BytesIO()
+    writer.write(output)
+    with pytest.raises(Problem, match="PDF_TEXT_REQUIRED"):
+        parse_pdf(output.getvalue())
+
+
 @pytest.mark.parametrize("name,raw,expected", [
     ("resume.DOCX", make_docx(), "docx"),
     ("resume.PDF", make_pdf(), "pdf"),

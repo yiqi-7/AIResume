@@ -40,7 +40,9 @@ def parse_pdf(raw: bytes):
         parts, total = [], 0
         for page in reader.pages:
             text = page.extract_text(extraction_mode="layout", layout_mode_strip_rotated=False)
-            if not text.strip() and (has_images(page.get("/Resources")) or page.get_contents()):
+            contents = page.get_contents()
+            if not text.strip() and (has_images(page.get("/Resources")) or
+                                    (contents is not None and contents.get_data().strip())):
                 raise Problem("PDF_TEXT_REQUIRED",
                               "PDF 含有无法读取文字的页面。仅支持可复制文字的 PDF，暂不支持扫描件或图片型 PDF。", 422)
             if any(char in text for char in ("\ufffd", "\x00")):
