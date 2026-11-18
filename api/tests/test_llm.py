@@ -125,6 +125,9 @@ async def test_missing_station_and_byok_allowlist_and_fact_answer():
             client.resolve("station", "", None)
         with pytest.raises(Problem, match="MODEL_KEY_REQUIRED"):
             client.resolve("https://internal.invalid", "model", "fake")
+        for removed in ('qwen', 'zhipu'):
+            with pytest.raises(Problem, match="MODEL_KEY_REQUIRED"):
+                client.resolve(removed, 'test-model', 'old-saved-key')
         credentials = client.resolve("deepseek", "test-model", "fake-test-key")
         text = await client.answer(session, candidate, "整理用户反馈，与同学核对原型。", credentials)
         assert text == "整理用户反馈，与同学核对原型。"
