@@ -30,6 +30,8 @@ export default function CustomAPIEditor({initial,editing,onSave,onCancel}:Props)
   const [failed,setFailed]=useState(false);
   const feedback=useRef<HTMLParagraphElement>(null);
   const controller=useRef<AbortController|null>(null);
+  // Safari may report compositionend before the Enter key that confirmed it.
+  const compositionEndedAt=useRef<number|null>(null);
   useEffect(()=>()=>controller.current?.abort(),[]);
 
   function notify(text:string,failure=false){setMessage(text);setFailed(failure);}
@@ -77,12 +79,12 @@ export default function CustomAPIEditor({initial,editing,onSave,onCancel}:Props)
     <label htmlFor="custom-protocol">API 协议</label>
     <select id="custom-protocol" value={profile.protocol} disabled={fetching} onChange={e=>setProfile({...profile,protocol:e.target.value as CustomAPI['protocol']})}>{Object.entries(protocolNames).map(([value,name])=><option key={value} value={value}>{name}</option>)}</select>
     <label htmlFor="custom-key">API Key</label>
-    <div className="api-key-input"><input id="custom-key" type={showKey?'text':'password'} value={profile.key} disabled={fetching} onChange={e=>setProfile({...profile,key:e.target.value})} onBlur={()=>blur('key')} maxLength={512} autoComplete="off" required aria-invalid={!!errors.key} aria-describedby="custom-key-error"/><button type="button" className="icon-button" aria-label={showKey?'隐藏 API Key':'显示 API Key'} onClick={()=>setShowKey(!showKey)}>{showKey?<EyeOff size={18}/>:<Eye size={18}/>}</button></div>{fieldError('key')}
+    <div className="api-key-input"><input id="custom-key" type={showKey?'text':'password'} value={profile.key} disabled={fetching} onChange={e=>setProfile({...profile,key:e.target.value})} onBlur={()=>blur('key')} maxLength={512} autoComplete="off" required aria-invalid={!!errors.key} aria-describedby="custom-key-error"/><button type="button" className="icon-button" aria-label={showKey?'隐藏 API Key':'显示 API Key'} aria-pressed={showKey} onClick={()=>setShowKey(!showKey)}>{showKey?<EyeOff size={18}/>:<Eye size={18}/>}</button></div>{fieldError('key')}
     <div className="model-catalog">
       <div className="model-catalog-heading"><h3>模型目录 <span>{profile.models.length} 个</span></h3><button type="button" className="text-button" onClick={fetchModels} disabled={fetching} aria-busy={fetching}>{fetching?<><LoaderCircle className="spin" size={14}/>正在获取…</>:'获取可用模型'}</button></div>
       <p className="field-hint">点击模型设为默认，也可手动添加。</p>
       {profile.models.length>0?<div className="model-chips">{profile.models.map(model=><span key={model} className={profile.model===model?'selected':''}><button className="model-choice" type="button" aria-pressed={profile.model===model} aria-label={`设为默认模型 ${model}`} onClick={()=>setProfile({...profile,model})}>{model}</button><button type="button" aria-label={`移除模型 ${model}`} onClick={()=>{const models=profile.models.filter(m=>m!==model);setProfile({...profile,models,model:profile.model===model?models[0]??'':profile.model});}}><X size={13}/></button></span>)}</div>:<p className="model-catalog-empty">尚未添加模型。获取可用模型，或在下方手动添加。</p>}
-      <div className="add-model-row"><input aria-label="添加模型 ID" value={newModel} onChange={e=>setNewModel(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();addModel();}}} placeholder="例如 gpt-6-luna" maxLength={100} autoComplete="off"/><button className="button quiet" type="button" onClick={addModel}><Plus size={15}/>添加模型</button></div>
+      <div className="add-model-row"><input aria-label="添加模型 ID" value={newModel} onChange={e=>setNewModel(e.target.value)} onCompositionEnd={e=>{compositionEndedAt.current=e.timeStamp;}} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();if(e.nativeEvent.isComposing||(compositionEndedAt.current!==null&&Math.abs(e.timeStamp-compositionEndedAt.current)<50))return;addModel();}}} placeholder="例如 gpt-6-luna" maxLength={100} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false}/><button className="button quiet" type="button" onClick={addModel}><Plus size={15}/>添加模型</button></div>
     </div>
     <label htmlFor="custom-model">默认模型 ID</label>
     <input id="custom-model" list="custom-models" value={profile.model} onChange={e=>setProfile({...profile,model:e.target.value})} onBlur={()=>blur('model')} placeholder="选择或填写模型 ID" maxLength={100} autoComplete="off" required aria-invalid={!!errors.model} aria-describedby="custom-model-error"/>

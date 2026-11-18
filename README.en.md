@@ -20,6 +20,7 @@ The interface and analysis prompts are currently primarily in Chinese.
 - **Preview and Word export**: Apply accepted changes to a consistent, simple layout, preview the result, and download an editable DOCX.
 - **Choose your model service**: See the site-provided model ID, use a built-in provider or custom API, fetch available models, save multiple model IDs, and switch the model used for an analysis.
 - **No account required**: Start without registering, or explore a fictional demo that makes no model calls.
+- **Text scaling and small screens**: Interface text follows user font-size settings, headings and controls can reflow, and model input handles Chinese IME confirmation safely.
 
 ## How to use
 
@@ -111,3 +112,5 @@ npm run build
 ```
 
 The browser workflow script, [scripts/browser_qa.py](scripts/browser_qa.py), uses a simulated model and page-count service. Ubuntu integration tests verify the actual isolated document service. Model availability and generation quality need to be verified separately with the selected provider.
+
+The frontend follows [Modern Web Guidance](https://github.com/GoogleChrome/modern-web-guidance), progressively enhancing typography, forms, and accessibility according to browser support.
