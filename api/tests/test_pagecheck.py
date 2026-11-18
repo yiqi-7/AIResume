@@ -337,7 +337,12 @@ async def test_task_cancellation_kills_descendants_and_leaves_no_running_child(t
         child = int(marker.read_text())
         for _ in range(100):
             status = Path(f"/proc/{child}/status")
-            if not status.exists() or "\nState:\tZ" in status.read_text():
+            try:
+                process_status = status.read_text()
+            except FileNotFoundError:
+                # Exiting between a separate exists/read pair is also successful cleanup.
+                break
+            if "\nState:\tZ" in process_status:
                 break
             await asyncio.sleep(0.01)
         else:

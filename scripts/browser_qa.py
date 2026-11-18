@@ -170,6 +170,13 @@ def main():
                     enlarged.evaluate('e=>e.remove()')
 
             page.goto("http://127.0.0.1:4322/", wait_until="networkidle")
+            # Keep the first two homepage sections; only the closing promotion is removed.
+            expect(page.locator('.landing main > section')).to_have_count(2)
+            expect(page.locator('.hero-stage')).to_be_visible()
+            expect(page.get_by_role('heading', name='使用步骤', exact=True)).to_be_visible()
+            expect(page.locator('.process-list > li')).to_have_count(3)
+            expect(page.locator('.closing-section')).to_have_count(0)
+            assert '下一次投递前' not in page.locator('body').inner_text()
             capture("landing-desktop")
             assert page.locator('meta[name="text-scale"]').get_attribute('content') == 'scale'
             page.set_viewport_size({"width": 320, "height": 844})
