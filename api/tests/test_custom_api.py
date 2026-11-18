@@ -306,7 +306,8 @@ async def test_model_catalog_and_analysis_do_not_store_custom_configuration(tmp_
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test", headers=HEADERS
         ) as c:
-            catalog = await c.post("/api/models", headers={"X-LLM-Key": KEY}, json=payload)
+            catalog = await c.post("/api/models", headers={"X-LLM-Key": KEY},
+                                   json={**payload, "model": "not selected yet"})
             assert catalog.json() == {"models": ["synthetic-model"]}
             session = await upload(c)
             sid = session["id"]

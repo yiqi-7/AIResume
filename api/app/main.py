@@ -205,7 +205,7 @@ def create_app(settings: Settings | None = None, model_transport=None, pagecheck
     async def model_catalog(data: AnalyzeRequest, x_llm_key: str | None = Header(default=None)):
         if data.provider == "station":
             raise Problem("MODEL_KEY_REQUIRED", "请填写自己的 API Key 后获取模型目录。", 422)
-        credentials = model.resolve(data.provider, data.model or "catalog", x_llm_key,
+        credentials = model.resolve(data.provider, "catalog", x_llm_key,
                                     data.base_url, data.protocol)
         if catalog_slots.locked():
             raise Problem("BUSY", "正在获取其他模型目录，请稍后再试。", 429)

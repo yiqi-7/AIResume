@@ -239,3 +239,29 @@ async def test_network_timeout_has_a_distinct_error_and_is_not_retried():
         assert len(calls) == 1 and 'synthetic-private-timeout' not in error.value.message
     finally:
         await client.close()
+
+
+@pytest.mark.parametrize("protocol,byok", [
+    ("chat_completions", False), ("responses", False), ("chat_completions", True),
+])
+async def test_optional_station_reasoning_effort_does_not_override_user_api(protocol, byok):
+    settings = station().model_copy(update={"llm_reasoning_effort": "low"})
+
+    def upstream(request):
+        payload = json.loads(request.content)
+        if byok:
+            assert 'reasoning_effort' not in payload and 'reasoning' not in payload
+        elif protocol == 'responses':
+            assert payload['reasoning'] == {'effort': 'low'}
+        else:
+            assert payload['reasoning_effort'] == 'low'
+        if protocol == 'responses':
+            return httpx.Response(200, json={'status': 'completed', 'output': [
+                {'type': 'message', 'content': [{'type': 'output_text', 'text': '{"ok":true}'}]}]})
+        return response('{"ok":true}')
+
+    client = ModelClient(settings, Metadata(settings), httpx.MockTransport(upstream))
+    try:
+        assert await client.complete(settings.llm_base_url, 'model', 'fake-key', [], byok, protocol) == '{"ok":true}'
+    finally:
+        await client.close()

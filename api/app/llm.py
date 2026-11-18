@@ -121,6 +121,11 @@ class ModelClient:
             payload = {"model": model, "max_tokens": self.settings.llm_output_tokens, "stream": False,
                        "system": "\n".join(m["content"] for m in messages if m["role"] == "system"),
                        "messages": [m for m in messages if m["role"] != "system"]}
+        if not byok and self.settings.llm_reasoning_effort:
+            if protocol == "chat_completions":
+                payload["reasoning_effort"] = self.settings.llm_reasoning_effort
+            elif protocol == "responses":
+                payload["reasoning"] = {"effort": self.settings.llm_reasoning_effort}
         headers = {"Accept-Encoding": "identity"}
         if protocol == "anthropic_messages":
             headers.update({"x-api-key": key, "anthropic-version": "2023-06-01"})
