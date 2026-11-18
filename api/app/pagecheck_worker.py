@@ -13,6 +13,9 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from .pagecheck import EXTRACTION_ERRORS
+from .schemas import Resume
+
 MAX_BYTES = 5 * 1024 * 1024
 TASK_SECONDS = 30
 TMP_BYTES = 96 * 1024 * 1024
@@ -92,6 +95,11 @@ async def task_process(directory: Path):
         stdout, _ = await process.communicate()
         if process.returncode == 4:
             return None, "ACTIVE_CONTENT"
+        error_file = directory / "error.txt"
+        if process.returncode and error_file.is_file() and error_file.stat().st_size < 100:
+            code = error_file.read_text(encoding="ascii")
+            if code in EXTRACTION_ERRORS:
+                return None, code
         if process.returncode or not stdout.strip().isdigit() or len(stdout) > 16:
             return None, "PAGECHECK_FAILED"
         return int(stdout.strip()), None
@@ -120,8 +128,13 @@ def create_worker():
         return {"status": "ok", "isolated": True, "active_jobs": state["active"],
                 "temporary_jobs": len(list(Path("/tmp").glob("pagecheck-*")))}
 
+    @worker.post("/extract")
     @worker.post("/count")
     async def count(request: Request):
+        extracting = request.url.path == "/extract"
+        format = request.query_params.get("format", "") if extracting else "docx"
+        if format not in ({"doc", "pdf"} if extracting else {"docx"}):
+            return JSONResponse({"code": "PAGECHECK_FAILED"}, status_code=422)
         if slot.locked():
             return JSONResponse({"code": "PAGECHECK_BUSY"}, status_code=429)
         await slot.acquire()
@@ -131,8 +144,10 @@ def create_worker():
                 # The service mounts this tmpfs privately; normal disks are read-only.
                 with tempfile.TemporaryDirectory(prefix="pagecheck-", dir="/tmp") as scratch:
                     directory = Path(scratch)
+                    if extracting:
+                        (directory / "extract").touch()
                     received = 0
-                    with (directory / "source.docx").open("wb") as source:
+                    with (directory / ("source." + format)).open("wb") as source:
                         async for chunk in request.stream():
                             received += len(chunk)
                             if received > MAX_BYTES:
@@ -145,6 +160,12 @@ def create_worker():
                         return JSONResponse({"code": "PAGECHECK_FAILED"}, status_code=422)
                     if pages > 8:
                         return JSONResponse({"code": "PAGE_LIMIT"}, status_code=422)
+                    if extracting:
+                        result = directory / "result.json"
+                        if not result.is_file() or result.stat().st_size > 1024 * 1024:
+                            return JSONResponse({"code": "PAGECHECK_FAILED"}, status_code=422)
+                        resume = Resume.model_validate_json(result.read_bytes())
+                        return {"pages": pages, "resume": resume.model_dump()}
                     return {"pages": pages}
         except TimeoutError:
             return JSONResponse({"code": "PAGECHECK_TIMEOUT"}, status_code=422)

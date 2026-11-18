@@ -14,7 +14,7 @@ from starlette.background import BackgroundTask
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .config import Settings
-from .documents import export_docx, final_resume, parse_docx
+from .documents import export_docx, final_resume, parse_docx, upload_format
 from .llm import PROVIDERS, ModelClient
 from .metadata import Metadata
 from .pagecheck import PageChecker
@@ -38,6 +38,7 @@ def create_app(settings: Settings | None = None, model_transport=None, pagecheck
     model = ModelClient(settings, metadata, transport=model_transport)
     pagecheck = PageChecker(settings.pagecheck_socket, transport=pagecheck_transport)
     upload_slots = asyncio.BoundedSemaphore(settings.max_active_uploads)
+    catalog_slots = asyncio.BoundedSemaphore(2)
 
     async def sweeper():
         while True:
@@ -197,6 +198,18 @@ def create_app(settings: Settings | None = None, model_transport=None, pagecheck
             response.delete_cookie(settings.cookie_name, path="/api")
             return {"session": None}
 
+    @app.post("/api/models")
+    async def model_catalog(data: AnalyzeRequest, x_llm_key: str | None = Header(default=None)):
+        if data.provider == "station":
+            raise Problem("MODEL_KEY_REQUIRED", "请填写自己的 API Key 后获取模型目录。", 422)
+        credentials = model.resolve(data.provider, data.model or "catalog", x_llm_key,
+                                    data.base_url, data.protocol)
+        if catalog_slots.locked():
+            raise Problem("BUSY", "正在获取其他模型目录，请稍后再试。", 429)
+        async with catalog_slots:
+            async with asyncio.timeout(20):
+                return {"models": await model.models(credentials)}
+
     @app.post("/api/sessions", status_code=201)
     async def create_session(request: Request, response: Response):
         async with upload_form(request, settings.upload_bytes, settings.jd_bytes + 1024,
@@ -207,29 +220,33 @@ def create_app(settings: Settings | None = None, model_transport=None, pagecheck
             if consent != "true":
                 raise Problem("CONSENT_REQUIRED", "请先阅读并确认本次数据处理说明。", 422)
             if not hasattr(upload, "read") or not isinstance(jd, str):
-                raise Problem("MATERIAL_REQUIRED", "请上传 DOCX 并粘贴目标岗位描述。", 422)
+                raise Problem("MATERIAL_REQUIRED", "请上传 Word 或 PDF 并粘贴目标岗位描述。", 422)
             if len(jd.strip()) < 40:
                 raise Problem("JD_TOO_SHORT", "岗位描述太短，请补充岗位职责和任职要求。", 422)
             if len(jd.encode("utf-8")) > settings.jd_bytes:
                 raise Problem("JD_TOO_LONG", "岗位描述超过 2 MB，请仅保留本岗位的职责与要求。", 413)
             name = getattr(upload, "filename", "") or ""
-            if not name.casefold().endswith(".docx"):
-                raise Problem("INVALID_DOCX", "目前仅支持 DOCX 文件。", 415)
             raw = bytearray()
             while chunk := await upload.read(65536):
                 raw.extend(chunk)
                 if len(raw) > settings.upload_bytes:
                     raise Problem("FILE_TOO_LARGE", "简历超过 5 MB，请精简后重试。", 413)
-            resume = await asyncio.to_thread(parse_docx, bytes(raw))
+            format = upload_format(name, bytes(raw))
+            if format == "docx":
+                resume = await asyncio.to_thread(parse_docx, bytes(raw))
+            else:
+                resume = await pagecheck.extract(bytes(raw), format)
             chars = sum(len(b.text) for s in resume.sections for b in s.blocks) + len(jd)
             if chars > settings.max_analysis_chars:
                 raise Problem(
                     "CONTEXT_TOO_LONG",
                     "材料超出当前模型处理范围，请精简 JD 或简历；系统不会静默截断。", 422
                 )
-            resume.rendered_pages = await pagecheck.count(bytes(raw))
+            if format == "docx":
+                resume.rendered_pages = await pagecheck.count(bytes(raw))
             resume.page_count_verified = True
-            resume.warnings.append("页数按服务器排版结果校验，可能与本机 Word 的字体和分页不同。")
+            if format != "pdf":
+                resume.warnings.append("页数按服务器排版结果校验，可能与本机 Word 的字体和分页不同。")
             ip = request.client.host if request.client else "unknown"
             ip_key = hmac.new(
                 settings.ip_salt.get_secret_value().encode(), ip.encode(), hashlib.sha256
@@ -314,7 +331,8 @@ def create_app(settings: Settings | None = None, model_transport=None, pagecheck
     async def analyze(sid: str, data: AnalyzeRequest, request: Request,
                       x_llm_key: str | None = Header(default=None)):
         await store.authorize(sid, request.cookies.get(settings.cookie_name))
-        credentials = model.resolve(data.provider, data.model, x_llm_key)
+        credentials = model.resolve(data.provider, data.model, x_llm_key,
+                                    data.base_url, data.protocol)
         async with store.job_guard:
             async with store.lock(sid):
                 session = await store.read(sid)
@@ -421,7 +439,8 @@ def create_app(settings: Settings | None = None, model_transport=None, pagecheck
         await store.authorize(sid, request.cookies.get(settings.cookie_name))
         if not data.confirmed:
             raise Problem("CONFIRM_FACTS", "请确认补充的信息真实。", 422)
-        credentials = model.resolve(data.provider, data.model, x_llm_key)
+        credentials = model.resolve(data.provider, data.model, x_llm_key,
+                                    data.base_url, data.protocol)
         async with store.job_guard:
             async with store.lock(sid):
                 session = await store.read(sid)

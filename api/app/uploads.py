@@ -34,7 +34,7 @@ class BoundedMemoryParser(MultiPartParser):
 @asynccontextmanager
 async def upload_form(request: Request, file_limit: int, field_limit: int, timeout: float):
     if not request.headers.get("content-type", "").lower().startswith("multipart/form-data"):
-        raise Problem("MATERIAL_REQUIRED", "请上传 DOCX 并粘贴目标岗位描述。", 422)
+        raise Problem("MATERIAL_REQUIRED", "请上传 Word 或 PDF 并粘贴目标岗位描述。", 422)
     parser = BoundedMemoryParser(request, file_limit, field_limit)
     form = None
     try:

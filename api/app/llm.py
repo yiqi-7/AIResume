@@ -1,11 +1,13 @@
 import json
 import re
 import unicodedata
+from typing import NamedTuple
 
 import httpx
 from pydantic import ValidationError
 
 from .config import Settings
+from .custom_api import PublicAPITransport, validate_base_url
 from .metadata import Metadata
 from .schemas import Candidate, CandidateList, Problem, Resume, Session
 
@@ -22,6 +24,15 @@ SYSTEM = """你是谨慎的中文简历编辑。只依据提供的简历、JD �
 不能为了优化表达而推断用户做过什么。只有真实来源支持的改写才可输出。
 返回 JSON 对象，不要 markdown。输出格式严格遵守给定 schema。
 同一问题不要重复，最多提供六条最值得处理的建议。"""
+
+
+class Credentials(NamedTuple):
+    endpoint: str
+    model: str
+    key: str
+    byok: bool
+    protocol: str = "chat_completions"
+    custom: bool = False
 
 
 def normalize(text: str) -> str:
@@ -58,10 +69,15 @@ class ModelClient:
     def __init__(self, settings: Settings, metadata: Metadata, transport=None):
         self.settings, self.metadata = settings, metadata
         self.http = httpx.AsyncClient(
-            timeout=settings.llm_timeout, follow_redirects=False, transport=transport
+            timeout=settings.llm_timeout, follow_redirects=False, transport=transport, trust_env=False,
+        )
+        self.custom_http = httpx.AsyncClient(
+            timeout=settings.llm_timeout, follow_redirects=False, trust_env=False,
+            transport=PublicAPITransport(transport),
         )
 
-    def resolve(self, provider: str, model: str, key: str | None):
+    def resolve(self, provider: str, model: str, key: str | None,
+                base_url: str = "", protocol: str = "chat_completions"):
         if provider == "station":
             if not self.settings.llm_base_url or not self.settings.llm_model:
                 raise Problem(
@@ -71,33 +87,49 @@ class ModelClient:
             station_key = self.settings.llm_api_key.get_secret_value()
             if not station_key:
                 raise Problem("MODEL_NOT_CONFIGURED", "站方模型尚未配置，请使用自己的 Key。", 503)
-            return self.settings.llm_base_url.rstrip("/"), self.settings.llm_model, station_key, False
-        if provider not in PROVIDERS or not key or not key.strip():
+            return Credentials(self.settings.llm_base_url.rstrip("/"), self.settings.llm_model,
+                               station_key, False)
+        if provider not in {*PROVIDERS, "custom"} or not key or not key.strip():
             raise Problem("MODEL_KEY_REQUIRED", "请选择模型服务并填写你自己的 API Key。", 422)
         if not model.strip() or not re.fullmatch(r"[\w./:+-]{1,100}", model):
             raise Problem("MODEL_NAME_REQUIRED", "请填写该服务商支持的模型名称。", 422)
         if len(key) > 512 or any(ord(c) < 32 or ord(c) > 126 for c in key):
             raise Problem("MODEL_KEY_INVALID", "API Key 格式不正确，请重新粘贴。", 422)
-        return PROVIDERS[provider]["base"], model, key.strip(), True
+        if provider == "custom":
+            if protocol not in {"chat_completions", "responses"}:
+                raise Problem("MODEL_PROTOCOL_INVALID", "请选择支持的 API 协议。", 422)
+            return Credentials(validate_base_url(base_url), model, key.strip(), True, protocol, True)
+        return Credentials(PROVIDERS[provider]["base"], model, key.strip(), True)
 
-    async def complete(self, endpoint, model, key, messages, byok):
+    async def complete(self, endpoint, model, key, messages, byok,
+                       protocol="chat_completions", custom=False):
         payload = {
             "model": model, "messages": messages, "temperature": 0.2,
             "max_tokens": 2400, "response_format": {"type": "json_object"}, "stream": False,
         }
+        path = "/chat/completions"
+        if protocol == "responses":
+            path = "/responses"
+            payload = {"model": model, "input": messages, "max_output_tokens": 2400,
+                       "text": {"format": {"type": "json_object"}}, "stream": False,
+                       "store": False}
         if not byok:
             # Conservative per-attempt reservation, including failed attempts and retries.
             reserved = len(json.dumps(payload, ensure_ascii=False).encode()) + 6500
             await self.metadata.reserve_tokens(reserved)
         try:
-            async with self.http.stream(
-                "POST", endpoint + "/chat/completions",
-                headers={"Authorization": "Bearer " + key}, json=payload,
+            client = self.custom_http if custom else self.http
+            async with client.stream(
+                "POST", endpoint + path,
+                headers={"Authorization": "Bearer " + key, "Accept-Encoding": "identity"},
+                json=payload,
             ) as response:
                 if response.status_code in {401, 403}:
                     raise Problem("MODEL_KEY_INVALID", "模型 Key 无效或没有调用权限，请检查设置。", 401)
-                if response.status_code >= 400:
+                if response.status_code >= 300:
                     raise Problem("MODEL_UPSTREAM", "模型服务暂时不可用，请稍后重试。", 502)
+                if response.headers.get("content-encoding", "identity").strip().casefold() != "identity":
+                    raise ValueError("Compressed model responses are not accepted")
                 data = bytearray()
                 async for chunk in response.aiter_bytes():
                     data.extend(chunk)
@@ -105,11 +137,20 @@ class ModelClient:
                         raise Problem("MODEL_RESPONSE_LARGE", "模型返回内容过大，请稍后重试。", 502)
             result = json.loads(data)
             usage = result.get("usage") or {}
-            for field in ["prompt_tokens", "completion_tokens"]:
-                value = usage.get(field)
+            for field, responses_field in [("prompt_tokens", "input_tokens"),
+                                           ("completion_tokens", "output_tokens")]:
+                value = usage.get(responses_field if protocol == "responses" else field)
                 if isinstance(value, int) and value >= 0:
                     await self.metadata.stat(("byok_" if byok else "station_") + field, value)
-            content = result["choices"][0]["message"]["content"]
+            if protocol == "responses":
+                if result.get("status") != "completed":
+                    raise ValueError()
+                content = "".join(part["text"] for item in result["output"]
+                                  if item.get("type") == "message"
+                                  for part in item.get("content", [])
+                                  if part.get("type") == "output_text")
+            else:
+                content = result["choices"][0]["message"]["content"]
             if not isinstance(content, str):
                 raise ValueError()
             return content
@@ -118,8 +159,41 @@ class ModelClient:
         except (httpx.HTTPError, KeyError, IndexError, AttributeError, ValueError, TypeError):
             raise Problem("MODEL_UPSTREAM", "没有收到可读取的模型结果，请稍后重试。", 502)
 
+    async def models(self, credentials: Credentials) -> list[str]:
+        try:
+            client = self.custom_http if credentials.custom else self.http
+            async with client.stream("GET", credentials.endpoint + "/models",
+                                     headers={"Authorization": "Bearer " + credentials.key,
+                                              "Accept-Encoding": "identity"},
+                                     timeout=15) as response:
+                if response.status_code in {401, 403}:
+                    raise Problem("MODEL_KEY_INVALID", "模型 Key 无效或没有调用权限，请检查设置。", 401)
+                if response.status_code >= 300:
+                    raise ValueError()
+                if response.headers.get("content-encoding", "identity").strip().casefold() != "identity":
+                    raise ValueError("Compressed model responses are not accepted")
+                data = bytearray()
+                async for chunk in response.aiter_bytes():
+                    data.extend(chunk)
+                    if len(data) > 400_000:
+                        raise ValueError()
+            items = json.loads(data)["data"]
+            if not isinstance(items, list):
+                raise ValueError()
+            models = list(dict.fromkeys(item["id"] for item in items
+                                       if isinstance(item, dict) and
+                                       isinstance(item.get("id"), str) and
+                                       re.fullmatch(r"[\w./:+-]{1,100}", item["id"])))[:100]
+            if not models:
+                raise ValueError()
+            return models
+        except Problem:
+            raise
+        except (httpx.HTTPError, KeyError, ValueError, TypeError):
+            raise Problem("MODEL_CATALOG_UNAVAILABLE", "无法获取模型目录；可手动填写服务支持的模型 ID。", 502) from None
+
     async def dimension(self, dimension: str, session: Session, credentials):
-        endpoint, model, key, byok = credentials
+        endpoint, model, key, byok, protocol, custom = credentials
         data = {
             "dimension": dimension,
             "resume": session.resume.model_dump(),
@@ -138,7 +212,7 @@ class ModelClient:
         last_error = None
         for attempt in range(2):
             try:
-                raw = await self.complete(endpoint, model, key, messages, byok)
+                raw = await self.complete(endpoint, model, key, messages, byok, protocol, custom)
                 candidates = CandidateList.model_validate_json(raw).items
                 valid = [c for c in candidates if grounded(c, session.resume, session.jd)]
                 if len(valid) == len(candidates) or attempt:
@@ -148,7 +222,8 @@ class ModelClient:
             except (ValidationError, ValueError):
                 last_error = "JSON 结构不符合 schema。"
             except Problem as error:
-                if error.code in {"MODEL_KEY_INVALID", "TOKEN_BUDGET"}:
+                if error.code in {"MODEL_KEY_INVALID", "TOKEN_BUDGET", "MODEL_URL_INVALID",
+                                  "MODEL_URL_UNREACHABLE"}:
                     raise
                 last_error = error.code
             if not attempt:
@@ -160,7 +235,7 @@ class ModelClient:
         raise Problem("MODEL_INVALID_OUTPUT", "该维度的结果未通过校验，可以稍后重试。", 502)
 
     async def answer(self, session: Session, item, fact: str, credentials):
-        endpoint, model, key, byok = credentials
+        endpoint, model, key, byok, protocol, custom = credentials
         messages = [
             {"role": "system", "content": SYSTEM +
              "用户现在已明确补充事实。只用该事实写一条可加入简历的句子，"
@@ -171,7 +246,8 @@ class ModelClient:
         ]
         for attempt in range(2):
             try:
-                result = json.loads(await self.complete(endpoint, model, key, messages, byok))
+                result = json.loads(await self.complete(endpoint, model, key, messages, byok,
+                                                        protocol, custom))
                 rewrite = result["rewrite"]
                 candidate = item.model_copy(update={
                     "needs_fact": False, "rewrite": rewrite, "target_block_id": None,
@@ -188,3 +264,4 @@ class ModelClient:
 
     async def close(self):
         await self.http.aclose()
+        await self.custom_http.aclose()

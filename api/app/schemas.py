@@ -79,6 +79,8 @@ class Session(BaseModel):
 class AnalyzeRequest(BaseModel):
     provider: str = "station"
     model: str = Field(default="", max_length=100)
+    base_url: str = Field(default="", max_length=2048)
+    protocol: Literal["chat_completions", "responses"] = "chat_completions"
 
 
 class SuggestionEdit(BaseModel):

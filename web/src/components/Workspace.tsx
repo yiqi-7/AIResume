@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { ArrowLeft, ArrowRight, Check, ChevronLeft, ChevronRight, Download, FileText, LoaderCircle, Settings2, ShieldCheck, Upload, X } from 'lucide-react';
-import ModelDialog, { modelStorageKey } from './ModelDialog';
+import ModelDialog from './ModelDialog';
 import ResumePreview from './ResumePreview';
 import { ApiError, download, modelHeaders, request } from '../lib/api';
 import { applyDemo, demoSession } from '../lib/demo';
+import { customAPIStorageKey, loadModelSettings, modelRequest, modelStorageKey } from '../lib/model-settings';
 import type { Configuration, Dimension, ModelSettings, Resume, Session } from '../lib/types';
 
 const dimensionNames:Record<Dimension,string>={structure:'结构与阅读',content:'经历表达',relevance:'岗位相关'};
@@ -47,7 +48,7 @@ export default function Workspace(){
     let cancelled=false;
     const isDemo=new URLSearchParams(location.search).get('demo')==='1';
     setDemo(isDemo);
-    try{const saved=JSON.parse(localStorage.getItem(modelStorageKey)??'null');if(saved&&typeof saved.provider==='string'&&typeof saved.model==='string'&&typeof saved.key==='string')setModel(saved);}catch{/* Unavailable storage does not block an ephemeral session. */}
+    setModel(loadModelSettings());
     if(isDemo){setSession(demoSession());setLoading(false);return;}
     Promise.allSettled([request<Configuration>('/api/config'),request<{session:Session|null}>('/api/session')]).then(results=>{
       if(cancelled)return;
@@ -57,6 +58,11 @@ export default function Workspace(){
       setLoading(false);
     });
     return()=>{cancelled=true;};
+  },[]);
+
+  useEffect(()=>{
+    const sync=(event:StorageEvent)=>{if(event.key===modelStorageKey||event.key===customAPIStorageKey||event.key===null)setModel(loadModelSettings());};
+    window.addEventListener('storage',sync);return()=>window.removeEventListener('storage',sync);
   },[]);
 
   useEffect(()=>{
@@ -99,16 +105,16 @@ export default function Workspace(){
   async function action(fn:()=>Promise<void>){if(busy)return;setBusy(true);setError('');setNotice('');try{await fn();}catch(e){fail(e);}finally{setBusy(false);}}
   function chooseFile(selected:File|null){
     setError('');
-    if(selected&&(!selected.name.toLowerCase().endsWith('.docx')||selected.size>5*1024*1024)){setError('请选择不超过 5 MB 的 DOCX 文件。');setFile(null);if(fileInput.current)fileInput.current.value='';return;}
+    if(selected&&(!/^.+\.(docx?|pdf)$/i.test(selected.name)||selected.size>5*1024*1024)){setError('请选择不超过 5 MB 的 DOC、DOCX 或文字型 PDF 文件。');setFile(null);if(fileInput.current)fileInput.current.value='';return;}
     setFile(selected);
   }
   async function upload(e:React.SyntheticEvent<HTMLFormElement>){e.preventDefault();await action(async()=>{
-    if(!file){setError('请先选择 DOCX 简历。');return;}
+    if(!file){setError('请先选择 Word 或 PDF 简历。');return;}
     if(new Blob([jd]).size>2*1024*1024){setError('岗位描述超过 2 MB，请精简后重试。');return;}
     const form=new FormData();form.append('file',file);form.append('jd',jd);form.append('consent',String(consent));
     const created=await request<Session>('/api/sessions',{method:'POST',body:form});setSession(created);setFile(null);setJD('');setConsent(false);setTab('review');
   });}
-  async function analyze(){if(!session)return;await action(async()=>{setSession(await request<Session>(`/api/sessions/${session.id}/analyze`,{method:'POST',headers:modelHeaders(model.key),body:JSON.stringify({provider:model.provider,model:model.model})}));});}
+  async function analyze(){if(!session)return;await action(async()=>{setSession(await request<Session>(`/api/sessions/${session.id}/analyze`,{method:'POST',headers:modelHeaders(model.key),body:JSON.stringify(modelRequest(model))}));});}
   async function decide(decision:'accept'|'skip'|'restore'){
     if(!session||!item)return;
     await action(async()=>{
@@ -119,7 +125,7 @@ export default function Workspace(){
   }
   async function answer(){if(!session||!item)return;await action(async()=>{
     if(demo){setNotice('示例不调用模型。请使用自己的简历与模型设置，体验补充事实后的改写。');return;}
-    setSession(await request<Session>(`/api/sessions/${session.id}/suggestions/${item.id}/answer`,{method:'POST',headers:modelHeaders(model.key),body:JSON.stringify({answer:fact,section_id:sectionId,confirmed:factsConfirmed,provider:model.provider,model:model.model})}));
+    setSession(await request<Session>(`/api/sessions/${session.id}/suggestions/${item.id}/answer`,{method:'POST',headers:modelHeaders(model.key),body:JSON.stringify({answer:fact,section_id:sectionId,confirmed:factsConfirmed,...modelRequest(model)})}));
   });}
   async function finish(){if(!session)return;const choice=confirm;setConfirm(null);await action(async()=>{
     if(choice==='export'){
@@ -143,10 +149,10 @@ export default function Workspace(){
         <form className="intake-grid" onSubmit={upload}>
           <section className="intake-resume"><div className="form-section-title"><span>01</span><h2>你的现有简历</h2></div>
             <label className={'upload-zone '+(file?'has-file':'')} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();chooseFile(e.dataTransfer.files[0]??null);}}>
-              <input ref={fileInput} type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={e=>chooseFile(e.target.files?.[0]??null)} aria-label="选择 DOCX 简历"/>
-              <span className="upload-illustration"><FileText size={34} strokeWidth={1.3}/></span><strong>{file?file.name:'选择或拖入一份 DOCX'}</strong><span>{file?`${(file.size/1024).toFixed(0)} KB · 点击重新选择`:'不超过 5 MB · 服务器排版最多 8 页，建议 1–2 页'}</span><span className="button quiet"><Upload size={15}/>{file?'更换文件':'选择文件'}</span>
+              <input ref={fileInput} type="file" accept=".doc,.docx,.pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf" onChange={e=>chooseFile(e.target.files?.[0]??null)} aria-label="选择 Word 或 PDF 简历"/>
+              <span className="upload-illustration"><FileText size={34} strokeWidth={1.3}/></span><strong>{file?file.name:'选择或拖入 Word / PDF'}</strong><span>{file?`${(file.size/1024).toFixed(0)} KB · 点击重新选择`:'DOC / DOCX / 文字型 PDF · 5 MB 内 · 最多 8 页'}</span><span className="button quiet"><Upload size={15}/>{file?'更换文件':'选择文件'}</span>
             </label>
-            <div className="upload-footnote"><ShieldCheck size={17}/><p>仅用于本次修改。空闲 2 小时或创建后 6 小时失效，也可以随时主动结束。</p></div>
+            <div className="upload-footnote"><ShieldCheck size={17}/><p>PDF 需可复制文字，暂不支持扫描件。仅用于本次修改。空闲 2 小时或创建后 6 小时失效，也可以随时主动结束。</p></div>
           </section>
           <section className="intake-jd"><div className="form-section-title"><span>02</span><label htmlFor="jd"><h2>目标岗位描述</h2></label></div><textarea id="jd" value={jd} onChange={e=>setJD(e.target.value)} placeholder={'把招聘信息中的「岗位职责」和「任职要求」粘贴在这里。\n\n尽量保留岗位原文，删掉公司宣传与无关内容。'} minLength={40} required aria-describedby="jd-hint"/><div className="input-meta"><span id="jd-hint">至少 40 字符 · 最多 2 MB，另有模型上下文限制</span><span>{jd.length.toLocaleString()} 字符</span></div></section>
           <div className="intake-submit"><label className="check-label"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)} required/><span>我已阅读<a href="/privacy/" target="_blank" rel="noreferrer">数据处理说明</a>，同意临时处理材料，并在分析时发送给所选模型服务。</span></label><button className="button primary large" disabled={busy||!file||!consent||jd.trim().length<40} type="submit">{busy?<LoaderCircle size={18} className="spin"/>:'读取简历'}{!busy&&<ArrowRight size={18}/>}</button></div>
@@ -154,7 +160,7 @@ export default function Workspace(){
         <div className="intake-aside"><span>暂时没有材料？</span><a className="text-link" href="/app/?demo=1">看看一份虚构简历如何修改<ArrowUpRightIcon/></a></div>
       </>:<>
         {session.state==='parsed'?<>
-          <div className="parsed-grid"><section className="source-document"><div className="panel-heading"><FileText size={17}/><h2>读取到的简历内容</h2></div><SourceResume resume={session.resume}/></section><aside className="source-context"><h2>核对这几件事</h2><p>姓名、教育与经历是否完整？表格提取顺序是否正确？系统会使用下方文字分析，而非原文件的视觉版式。</p>{session.resume.page_count_verified&&<p className="field-hint">服务器排版：{session.resume.rendered_pages} / 8 页</p>}{session.resume.warnings.map(w=><p key={w} className="parse-warning">{w}</p>)}<details open><summary>目标岗位原文</summary><p className="jd-full">{session.jd}</p></details><p className="field-hint">读取不正确时，请结束会话，整理为普通单栏正文后重新上传。目前不支持 PDF 或文本框简历。</p></aside></div>
+          <div className="parsed-grid"><section className="source-document"><div className="panel-heading"><FileText size={17}/><h2>读取到的简历内容</h2></div><SourceResume resume={session.resume}/></section><aside className="source-context"><h2>核对这几件事</h2><p>姓名、教育与经历是否完整？表格提取顺序是否正确？系统会使用下方文字分析，而非原文件的视觉版式。</p>{session.resume.page_count_verified&&<p className="field-hint">已校验页数：{session.resume.rendered_pages} / 8 页</p>}{session.resume.warnings.map(w=><p key={w} className="parse-warning">{w}</p>)}<details open><summary>目标岗位原文</summary><p className="jd-full">{session.jd}</p></details><p className="field-hint">读取不正确时，请结束会话，整理为普通单栏正文后重新上传。支持 Word 文本框与文字型 PDF；复杂分栏或浮动文本框请逐项核对顺序。</p></aside></div>
           <div className="confirmation-bar"><p>确认读取内容后，才会发送给模型分析。</p><button className="button primary" onClick={analyze} disabled={busy}>{busy?<LoaderCircle size={17} className="spin"/>:<>读取无误，开始分析<ArrowRight size={17}/></>}</button></div>
         </>:running?<div className="analysis-state" role="status"><LoaderCircle size={30} className="spin"/><h2>{session.state==='answering'?'正在整理你补充的真实信息':'同时检查三个角度'}</h2><p>只保留通过结构与引用校验的结果。复杂材料可能需要几分钟。</p><div className="dimension-progress">{(Object.keys(dimensionNames) as Dimension[]).map(d=><div key={d}><span className={session.dimensions[d]==='complete'?'complete':''}>{session.dimensions[d]==='complete'?<Check size={16}/>:<span className="progress-dot"/>}</span>{dimensionNames[d]}</div>)}</div><p className="field-hint">可保持页面打开。刷新后会尝试恢复当前会话；轮询进度不会延长有效期。</p></div>:reviewable?<>
           <div className="review-toolbar"><div className="view-tabs" aria-label="工作区视图"><button className={tab==='review'?'active':''} aria-pressed={tab==='review'} onClick={()=>setTab('review')}>逐条修改<span>{session.suggestions.length}</span></button><button className={tab==='preview'?'active':''} aria-pressed={tab==='preview'} onClick={()=>setTab('preview')}>简历预览</button></div><div className="review-summary"><span>已采纳 {accepted} 条</span><button className="button primary small-button" onClick={()=>{if(demo){setNotice('示例仅展示交互。使用自己的简历后，可以导出真实的 Word 文档。');return;}setConfirm('export');}} disabled={busy}><Download size={16}/>导出 Word</button></div></div>
