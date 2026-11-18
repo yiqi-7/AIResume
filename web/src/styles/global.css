@@ -56,12 +56,42 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
 .brand-symbol span:nth-child(3) { width: 20px; }
 .site-header { display: flex; align-items: center; justify-content: space-between; height: 106px; }
 .landing .site-header { min-height: 4.875rem; }
-.hero { display: flex; align-items: center; min-height: 440px; padding-block: 64px 80px; }
+.site-header nav { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 32px; color: var(--muted); font-size: 0.875rem; }
+.site-header nav>a { display: inline-flex; align-items: center; min-height: 44px; }
+.site-header nav>a:hover { color: var(--accent); }
+.hero { display: grid; grid-template-columns: .95fr 1.05fr; align-items: center; gap: 55px; padding-block: 60px 100px; min-height: 690px; }
 .hero-copy { max-width: 40rem; }
 .hero h1 { font-size: 1.75rem; font-weight: 500; line-height: 1.5; }
-.hero-description { font-size: 1rem; color: var(--muted); margin-top: 16px; line-height: 1.9; }
+.hero-description { font-size: 1rem; color: var(--muted); max-width: 370px; margin-top: 16px; line-height: 1.9; }
 .hero-actions { display: flex; gap: 24px; align-items: center; margin-top: 28px; }
 .hero-actions .text-link { min-height: 44px; }
+.hero-stage { position: relative; padding-bottom: 25px; width: 100%; max-width: 540px; margin-left: auto; min-width: 0; }
+.stage-tab { padding: 10px 21px; font-size: 0.875rem; color: var(--muted); border: 1px solid var(--line); border-bottom: none; background: #f0f3f9; border-radius: 7px 7px 0 0; margin-right: 21px; }
+.hero-paper { position: relative; padding: 30px 33px 23px; margin-right: 21px; border: 1px solid #d5deed; background: white; box-shadow: 7px 13px 0 -1px #eaf0fa, 7px 13px 0 0 #dbe3f0; }
+.paper-person>span { font-size: 1.3125rem; font-weight: 600; }
+.paper-person>small { display: block; font-size: 0.875rem; color: var(--muted); margin-top: 6px; }
+.paper-rule { height: 1px; background: var(--ink); margin-block: 16px 20px; }
+.paper-section { color: var(--muted); font-size: 0.875rem; margin-bottom: 9px; }
+.hero-paper h2 { font-size: 1rem; font-weight: 600; }
+.paper-date { font-size: 0.875rem; color: var(--muted); margin-top: 3px; }
+.before-copy, .after-copy { position: relative; font-size: 1rem; line-height: 1.9; padding: 13px 14px; margin-top: 15px; margin-left: 1.375rem; }
+.before-copy { color: var(--muted); background: #f8f9fb; }
+.after-copy { background: #f0f3ff; border-left: 2px solid var(--accent); margin-top: 12px; color: #263751; padding-bottom: 17px; }
+.after-copy mark { background: transparent; border-bottom: 1px solid #9aacec; color: var(--accent); padding-bottom: 2px; }
+.margin-label { position: absolute; left: -2rem; top: 13px; font-size: 0.875rem; color: var(--muted); }
+.after-copy .margin-label { color: var(--accent); }
+.jd-strip { display: flex; gap: 15px; font-size: 0.875rem; padding-top: 13px; margin-left: 25px; color: var(--muted); }
+.jd-strip>span { color: var(--accent); flex-shrink: 0; }
+.process-section { border-top: 1px solid var(--line); background: white; padding-block: 66px; }
+.process-layout { display: grid; grid-template-columns: 1fr 1.08fr; gap: 70px; }
+.process-layout h2 { font-size: 1.5rem; font-weight: 500; line-height: 1.6; }
+.process-list { list-style: none; margin: 0; padding: 0; min-width: 0; }
+.process-list li { display: flex; gap: 20px; padding-block: 21px; border-top: 1px solid var(--line); }
+.process-list li:first-child { padding-top: 0; border: 0; }
+.process-list li:last-child { padding-bottom: 0; }
+.process-number { color: var(--muted); font-size: 0.875rem; padding-top: 3px; min-width: 14px; }
+.process-list h3 { font-size: 1rem; font-weight: 500; margin-bottom: 6px; }
+.process-list p { font-size: 1rem; color: var(--muted); line-height: 1.9; max-width: 365px; }
 .section-kicker { color: var(--muted); font-size: 0.875rem; margin-bottom: 12px; }
 .reading-page { max-width: 720px; margin: 48px auto 100px; padding-inline: 25px; font-size: 0.875rem; line-height: 2; }
 .reading-page h1 { font-size: 2rem; font-weight: 600; margin-bottom: 8px; }
@@ -295,8 +325,15 @@ summary { cursor: pointer; font-weight: 500; padding-block: 10px; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+@media (min-width: 93.75em) { .hero { min-height: 750px; } }
 @media (max-width: 62.5em) {
   .page-width { width: calc(100% - 64px); }
+  .hero { gap: 30px; padding-top: 45px; min-height: 610px; }
+  .hero-paper { padding: 23px 25px; }
+  .hero-actions { gap: 17px; }
+  .hero-actions .button { padding-inline: 18px; }
+  .jd-strip { margin-left: 0; gap: 8px; }
+  .process-layout { gap: 35px; }
   .intake-resume, .intake-jd { padding: 25px; }
   .review-grid { grid-template-columns: 210px minmax(0,1fr); gap: 22px; }
   .suggestion-detail { padding-inline: 24px; }
@@ -306,8 +343,16 @@ summary { cursor: pointer; font-weight: 500; padding-block: 10px; }
   .page-width { width: calc(100% - 42px); }
   .site-header { height: 79px; }
   .brand strong { font-size: 1.3125rem; }
-  .hero { min-height: 0; padding-block: 48px 64px; }
+  .site-header nav { gap: 16px; }
+  .hero { grid-template-columns: 1fr; min-height: 0; padding-block: 48px 64px; gap: 48px; }
   .hero h1 { font-size: 1.4375rem; line-height: 1.6; }
+  .hero-stage { max-width: 500px; margin-inline: auto; padding-left: 7px; }
+  .hero-paper { padding: 27px 30px 23px; }
+  .jd-strip { gap: 14px; }
+  .process-section { padding-block: 40px; }
+  .process-layout { grid-template-columns: 1fr; gap: 30px; }
+  .process-layout h2 { font-size: 1.25rem; }
+  .process-list p { max-width: 100%; }
   .work-header { padding-inline: 20px; height: 69px; gap: 14px; }
   .work-header .brand-en, .work-header-label, .model-status { display: none; }
   .work-header .brand { gap: 8px; }
@@ -403,8 +448,8 @@ summary { cursor: pointer; font-weight: 500; padding-block: 10px; }
 
 /* Readable controls and supporting text, shared across desktop and mobile. */
 .button { font-size: 0.9375rem; transition: none; }
-.hero h1, .workspace-heading h1, .suggestion-detail h2, .dialog-content>h2, .empty-state h2 { text-wrap: balance; }
-.hero-description, .field-hint, .preview-disclaimer, .suggestion-reason { text-wrap: pretty; }
+.hero h1, .workspace-heading h1, .process-layout h2, .suggestion-detail h2, .dialog-content>h2, .empty-state h2 { text-wrap: balance; }
+.hero-description, .process-list p, .field-hint, .preview-disclaimer, .suggestion-reason { text-wrap: pretty; }
 /* Let enlarged text reflow without changing the exported document's physical units. */
 .site-header, .work-header { height: auto; min-height: 4.3125rem; flex-wrap: wrap; row-gap: 12px; padding-block: 16px; }
 .site-header { min-height: 6.625rem; }
