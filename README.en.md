@@ -21,7 +21,7 @@ The interface and analysis prompts are currently primarily in Chinese.
 - **Choose your model service**: See the site-provided model ID, use a built-in provider or custom API, fetch available models, save multiple model IDs, and switch the model used for an analysis.
 - **No account required**: Start without registering, or explore a fictional demo that makes no model calls.
 - **Text scaling and small screens**: Interface text follows user font-size settings, headings and controls can reflow, and model input handles Chinese IME confirmation safely.
-- **A focused interface**: The settings control shows the active model. Columns, spacing, and selection states organize the content with fewer repeated labels; advanced options expand on demand.
+- **A focused interface**: The homepage keeps a short purpose statement, a start button, and a demo link, with heading sizes matched to the workspace. The settings control shows the active model, and advanced options expand on demand.
 
 ## How to use
 
