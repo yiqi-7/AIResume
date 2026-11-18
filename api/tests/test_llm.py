@@ -94,6 +94,27 @@ async def test_bad_key_is_not_retried_or_reflected():
         await client.close()
 
 
+async def test_success_envelope_with_plain_text_refusal_is_not_successful_analysis():
+    calls = []
+    refusal = "仅限 Coding 客户端使用。synthetic-private-refusal"
+
+    def upstream(req):
+        calls.append(req)
+        return response(refusal)
+
+    settings = station()
+    client = ModelClient(settings, Metadata(settings), httpx.MockTransport(upstream))
+    session, _ = sample()
+    try:
+        with pytest.raises(Problem, match="MODEL_INVALID_OUTPUT") as error:
+            await client.dimension("content", session, client.resolve("station", "", None))
+        assert len(calls) == 2
+        assert refusal not in error.value.message
+        assert "synthetic-private-refusal" not in error.value.message
+    finally:
+        await client.close()
+
+
 async def test_missing_station_and_byok_allowlist_and_fact_answer():
     settings = Settings(_env_file=None, llm_base_url="", llm_model="", llm_api_key=SecretStr(""))
     client = ModelClient(settings, Metadata(settings), httpx.MockTransport(
