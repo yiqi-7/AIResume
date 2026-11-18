@@ -1,6 +1,6 @@
 ---
 import Layout from '../layouts/Layout.astro';
-import { ArrowUpRight, FileText } from 'lucide-react';
+import { ArrowUpRight } from 'lucide-react';
 ---
 <Layout title="叙职 AIResume — 简历优化工具">
   <div class="landing">
@@ -14,10 +14,9 @@ import { ArrowUpRight, FileText } from 'lucide-react';
           <h1>根据目标岗位，修改你的简历。</h1>
           <p class="hero-description">上传简历和岗位描述，逐条核对修改建议，导出可编辑的 Word。</p>
           <div class="hero-actions"><a class="button primary large" href="/app/">开始修改简历<ArrowUpRight size={18} /></a><a class="text-link" href="/app/?demo=1">先看一个例子</a></div>
-          <p class="hero-note">无需注册</p>
         </div>
         <div class="hero-stage" aria-label="虚构简历的改写示例">
-          <div class="stage-tab"><span class="tiny-document"><FileText size={14} /></span><span>校园项目经历.docx</span><span class="example-label">简历示例</span></div>
+          <div class="stage-tab">改写示例</div>
           <div class="hero-paper">
             <div class="paper-person"><span>陈同学</span><small>应届毕业生 / 产品经理方向</small></div>
             <div class="paper-rule"></div><p class="paper-section">项目经历</p>
@@ -28,15 +27,12 @@ import { ArrowUpRight, FileText } from 'lucide-react';
           <div class="jd-strip"><span>岗位要求</span><p>“能够进行需求分析，并将需求转化为产品原型。”</p></div>
         </div>
       </section>
-      <section id="how-it-works" class="process-section">
-        <div class="page-width process-layout">
-          <div><h2>使用步骤</h2></div>
-          <ol class="process-list">
-            <li><span class="process-number">1</span><div><h3>放入简历与岗位</h3><p>上传 Word 或文字型 PDF，粘贴岗位职责和要求。先核对读取到的简历内容。</p></div></li>
-            <li><span class="process-number">2</span><div><h3>逐条检查，选择采纳</h3><p>对照简历原句和岗位要求。采纳、跳过，也可以亲手修改措辞。</p></div></li>
-            <li><span class="process-number">3</span><div><h3>预览并导出</h3><p>检查修改结果，下载可编辑的 Word 文档。</p></div></li>
+      <section id="how-it-works" class="process-section" aria-label="使用步骤">
+          <ol class="page-width process-list">
+            <li><span class="process-number" aria-hidden="true">1</span><h2>上传简历与岗位描述</h2></li>
+            <li><span class="process-number" aria-hidden="true">2</span><h2>逐条修改</h2></li>
+            <li><span class="process-number" aria-hidden="true">3</span><h2>导出 Word</h2></li>
           </ol>
-        </div>
       </section>
     </main>
     <footer class="site-footer page-width"><a class="brand small" href="/"><strong>叙职</strong><span class="brand-en">AIResume</span></a><a href="/privacy/">隐私说明</a></footer>

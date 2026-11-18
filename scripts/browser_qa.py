@@ -6,6 +6,7 @@ Chrome is used from its local installation; no Playwright browser download is re
 import http.client
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -118,7 +119,7 @@ def main():
             def capture(name):
                 page.evaluate("document.fonts.ready")
                 visible_copy = page.locator("body").inner_text()
-                for internal_copy in ("Provider ID", "创建后不可修改", "候选建议未通过依据校验", "正式上线前", "请确认服务已启动", "已校验页数", "服务端在响应完成后"):
+                for internal_copy in ("Provider ID", "创建后不可修改", "候选建议未通过依据校验", "正式上线前", "请确认服务已启动", "已校验页数", "服务端在响应完成后", "简历工作台", "当前模型：", "你的现有简历", "选择或拖入 Word / PDF", "本次使用的模型"):
                     assert internal_copy not in visible_copy, (name, internal_copy)
                 assert page.evaluate("document.fonts.check('14px \"Noto Sans SC Variable\"', '简历')")
                 assert page.evaluate("[...document.fonts].some(f=>f.family.includes('Noto Sans SC') && f.status==='loaded')")
@@ -177,12 +178,14 @@ def main():
             page.set_viewport_size({"width": 390, "height": 844})
             capture("landing-mobile")
             page.goto("http://127.0.0.1:4322/app/?demo=1", wait_until="networkidle")
-            expect(page.get_by_role("heading", name="修改建议" )).to_be_visible()
+            expect(page.get_by_role("heading", name="修改简历" )).to_be_visible()
             capture("review-mobile")
             capture_large_text('review-large-text')
             page.set_viewport_size({"width": 1440, "height": 1050})
             capture("review-desktop")
-            expect(page.get_by_role("button", name="模型设置")).to_have_count(0)
+            expect(page.locator('.suggestion-meta')).to_have_count(0)
+            expect(page.get_by_text('已采纳 0 条', exact=True)).to_have_count(0)
+            expect(page.get_by_role("button", name=re.compile(r"^模型设置"))).to_have_count(0)
 
             page.goto("http://127.0.0.1:4322/app/", wait_until="networkidle")
             retained = {'id': 'migration-kept', 'name': '迁移保留验证',
@@ -197,19 +200,22 @@ def main():
                 assert page.evaluate("JSON.parse(localStorage.getItem('airesume-custom-apis-v1'))") == [retained]
             page.evaluate("localStorage.setItem('airesume-model-v1',JSON.stringify({provider:'deepseek',model:'retained-model',key:'synthetic-deepseek-key'}))")
             page.reload(wait_until='networkidle')
-            expect(page.locator('.current-model')).to_contain_text('DeepSeek')
+            expect(page.locator('.current-model')).to_contain_text('retained-model')
             assert page.evaluate("JSON.parse(localStorage.getItem('airesume-model-v1')).model") == 'retained-model'
             page.evaluate("localStorage.removeItem('airesume-model-v1');localStorage.removeItem('airesume-custom-apis-v1')")
             page.reload(wait_until='networkidle')
-            page.get_by_role('button', name='模型设置').click()
+            page.get_by_role('button', name=re.compile(r"^模型设置")).click()
             expect(page.get_by_role('combobox', name='选择服务', exact=True)).to_contain_text('DeepSeek')
-            assert page.get_by_role('combobox', name='选择服务', exact=True).locator('option').all_text_contents() == ['默认模型', 'DeepSeek · 自己的 Key']
+            assert page.get_by_role('combobox', name='选择服务', exact=True).locator('option').all_text_contents() == ['默认模型 · test-model', 'DeepSeek · 自己的 Key']
             capture('model-settings-clean-desktop')
             page.set_viewport_size({"width": 320, "height": 844})
             capture_large_text('model-settings-large-text')
             page.set_viewport_size({"width": 1440, "height": 1050})
             page.get_by_role('button', name='关闭模型设置', exact=True).click()
             capture("upload-desktop")
+            expect(page.locator('.stepper, .work-header-label')).to_have_count(0)
+            expect(page.get_by_text('至少 40 字符', exact=True)).to_be_visible()
+            expect(page.locator('.current-model')).to_be_visible()
             sys.path.insert(0, str(ROOT / "api"))
             from tests.test_documents import make_textbox_docx
             from tests.test_pdf_documents import make_pdf
@@ -223,8 +229,10 @@ def main():
             expect(page.get_by_role("heading", name="核对简历内容")).to_be_visible()
             expect(page.get_by_text("陈测试 · fictional@example.invalid", exact=True)).to_be_visible()
             capture("parsed-desktop")
+            expect(page.locator('.panel-heading')).to_have_count(0)
+            expect(page.get_by_role('region', name='读取到的简历内容')).to_be_visible()
             page.get_by_role("button", name="读取无误，开始分析").click()
-            expect(page.get_by_role("heading", name="修改建议")).to_be_visible(timeout=20000)
+            expect(page.get_by_role("heading", name="修改简历")).to_be_visible(timeout=20000)
             page.get_by_role("button", name="写清个人行动").click()
             page.get_by_label("建议改写", exact=True).fill("访谈同学，整理需求并完成原型。")
             page.get_by_role("checkbox").check()
@@ -288,19 +296,19 @@ def main():
             # editing/deletion and a real UI -> API -> mocked upstream analysis.
             page.set_viewport_size({"width": 1440, "height": 1050})
             expect(page.locator('.current-model')).to_contain_text('test-model')
-            page.get_by_role('button', name='模型设置').click()
-            expect(page.locator('.station-model-info')).to_contain_text('test-model')
-            expect(page.locator('.station-model-info')).not_to_contain_text('OpenAI Chat Completions')
+            page.get_by_role('button', name=re.compile(r"^模型设置")).click()
+            expect(page.locator('#model-provider')).to_contain_text('test-model')
+            expect(page.locator('#model-provider')).not_to_contain_text('OpenAI Chat Completions')
             expect(page.get_by_role('button', name='清空全部 Key', exact=True)).to_have_count(0)
             capture('station-model-visible')
             page.get_by_role('button', name='关闭模型设置', exact=True).click()
             for index in range(1, 4):
-                page.get_by_role("button", name="模型设置").click()
+                page.get_by_role("button", name=re.compile(r"^模型设置")).click()
                 page.get_by_role("tab", name="自定义 API").click()
                 page.get_by_role("button", name="添加自定义 API", exact=True).click()
                 expect(page.get_by_label("Provider ID", exact=True)).to_have_count(0)
                 page.get_by_label("名称", exact=True).fill(f"虚构服务 {index}")
-                page.get_by_label("API 地址", exact=True).fill("https://provider.example.invalid/v1")
+                page.get_by_label("API 基础地址", exact=True).fill("https://provider.example.invalid/v1")
                 page.get_by_label("API Key", exact=True).fill(f"synthetic-browser-key-{index}")
                 if index == 2:
                     page.locator(".manual-model-entry > summary").click()
@@ -339,13 +347,13 @@ def main():
                 page.get_by_role("button", name="创建并使用", exact=True).click()
                 expect(page.get_by_role("dialog")).not_to_be_visible()
             page.reload(wait_until="networkidle")
-            page.get_by_role("button", name="模型设置").click()
+            page.get_by_role("button", name=re.compile(r"^模型设置")).click()
             expect(page.get_by_role("tab", name="自定义 API")).to_have_attribute("aria-selected", "true")
             expect(page.locator(".custom-api-card")).to_have_count(3)
             generated_ids = page.evaluate("JSON.parse(localStorage.getItem('airesume-custom-apis-v1')).map(p=>p.id)")
             assert len(set(generated_ids)) == 3 and all(value.startswith("api-") and len(value) == 40 for value in generated_ids)
             third = page.locator('.custom-api-card').filter(has=page.get_by_role('heading', name='虚构服务 3', exact=True))
-            third.get_by_label('本次使用的模型 · 虚构服务 3', exact=True).fill('test-model')
+            third.get_by_label('模型 · 虚构服务 3', exact=True).fill('test-model')
             third.get_by_role('button', name='使用', exact=True).click()
             page.reload(wait_until='networkidle')
             expect(page.locator('.current-model')).to_contain_text('test-model')
@@ -360,15 +368,15 @@ def main():
                 page.get_by_role('button', name='读取无误，开始分析').click()
             assert anthropic.value.post_data_json['protocol'] == 'anthropic_messages'
             assert anthropic.value.post_data_json['model'] == 'test-model'
-            expect(page.get_by_role('heading', name='修改建议')).to_be_visible(timeout=20000)
+            expect(page.get_by_role('heading', name="修改简历")).to_be_visible(timeout=20000)
             page.get_by_role('button', name='清除本次资料', exact=True).click()
             page.get_by_role('button', name='确认清除', exact=True).click()
             expect(page.get_by_role('heading', name='上传简历')).to_be_visible()
-            page.get_by_role('button', name='模型设置').click()
+            page.get_by_role('button', name=re.compile(r"^模型设置")).click()
             expect(page.get_by_role("button", name="添加自定义 API", exact=True)).to_be_disabled()
             capture("custom-api-limit-mobile")
             restricted = page.locator('.custom-api-card').filter(has=page.get_by_role('heading', name='虚构服务 1', exact=True))
-            restricted.get_by_label('本次使用的模型 · 虚构服务 1', exact=True).fill('restricted-model')
+            restricted.get_by_label('模型 · 虚构服务 1', exact=True).fill('restricted-model')
             restricted.get_by_role('button', name='使用', exact=True).click()
             page.get_by_label('选择 Word 或 PDF 简历').set_input_files(str(sample))
             page.get_by_label('目标岗位描述').fill('能够进行需求分析，并将需求转化为产品原型。与设计和研发同学沟通需求。具备清晰的书面表达与协作能力。')
@@ -383,7 +391,7 @@ def main():
             page.get_by_role('button', name='清除本次资料', exact=True).click()
             page.get_by_role('button', name='确认清除', exact=True).click()
             expect(page.get_by_role('heading', name='上传简历')).to_be_visible()
-            page.get_by_role('button', name='模型设置').click()
+            page.get_by_role('button', name=re.compile(r"^模型设置")).click()
             card = page.locator(".custom-api-card").filter(has=page.get_by_role("heading", name="虚构服务 2", exact=True))
             card.get_by_role("button", name="编辑", exact=True).click()
             expect(page.get_by_label("Provider ID", exact=True)).to_have_count(0)
@@ -391,7 +399,7 @@ def main():
             page.locator(".api-advanced > summary").click()
             page.get_by_label("API 协议", exact=True).select_option("responses")
             page.get_by_role("button", name="保存并使用", exact=True).click()
-            page.get_by_role("button", name="模型设置").click()
+            page.get_by_role("button", name=re.compile(r"^模型设置")).click()
             expect(page.get_by_role("heading", name="虚构服务 2 已更新", exact=True)).to_be_visible()
             page.get_by_role("button", name="删除 虚构服务 1", exact=True).click()
             expect(page.locator(".custom-api-card")).to_have_count(2)
@@ -411,12 +419,12 @@ def main():
             assert submitted.value.post_data_json["protocol"] == "responses"
             assert submitted.value.post_data_json["base_url"] == "https://provider.example.invalid/v1"
             assert submitted.value.headers["x-llm-key"] == "synthetic-browser-key-2"
-            expect(page.get_by_role("heading", name="修改建议")).to_be_visible(timeout=20000)
+            expect(page.get_by_role("heading", name="修改简历")).to_be_visible(timeout=20000)
             page.get_by_role("button", name="清除本次资料", exact=True).click()
             page.get_by_role("button", name="确认清除", exact=True).click()
             expect(page.get_by_role("heading", name="上传简历")).to_be_visible()
             assert page.evaluate("JSON.parse(localStorage.getItem('airesume-custom-apis-v1')).length") == 2
-            page.get_by_role("button", name="模型设置").click()
+            page.get_by_role("button", name=re.compile(r"^模型设置")).click()
             page.get_by_role("button", name="清空全部 Key", exact=True).click()
             assert page.evaluate("localStorage.getItem('airesume-custom-apis-v1')") is None
             assert page.evaluate("localStorage.getItem('airesume-model-v1')") is None
