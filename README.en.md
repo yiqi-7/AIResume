@@ -15,7 +15,7 @@ The interface and analysis prompts are currently primarily in Chinese.
 ## Features
 
 - **Word and PDF import**: Read DOC, DOCX (including text boxes), and PDFs with selectable text. Review the extracted resume before starting analysis.
-- **Suggestions based on the target role**: See the reason for each change, the original resume text, the relevant job requirement, and its priority.
+- **Suggestions based on the target role**: See the reason for each change, the original resume text, and the relevant job requirement.
 - **Review changes individually**: Accept, skip, undo, or edit suggestions. Supply factual details when more information is needed for a rewrite.
 - **Preview and Word export**: Apply accepted changes to a consistent, simple layout, preview the result, and download an editable DOCX.
 - **Choose your model service**: See the site-provided model ID, use a built-in provider or custom API, fetch available models, save multiple model IDs, and switch the model used for an analysis.
@@ -27,15 +27,15 @@ The interface and analysis prompts are currently primarily in Chinese.
 1. **Prepare your materials**: Upload a Word document or a PDF with selectable text, then paste the target role's responsibilities and requirements.
 2. **Check the extracted content**: Verify your name, education, projects, and work experience before starting analysis.
 3. **Review each suggestion**: Compare the proposed change with its references. Accept, skip, or edit it, and add factual details when needed.
-4. **Preview and export**: Check the result, download the Word document, and end the session.
+4. **Preview and export**: Confirm the result, then download the Word document. Exporting clears the current materials.
 
 ## Model services
 
-Open **模型设置** (Model settings) in the upper-right corner of the workspace. You can use the site-provided model, enter your own DeepSeek API key, or connect another service through a custom API. A custom configuration includes a Provider ID, display name, API base URL, protocol, API key, and model list. Supported protocols are OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages.
+Open **模型设置** (Model settings) in the upper-right corner of the workspace. You can use the site-provided model, enter your own DeepSeek API key, or connect another service through a custom API. Enter a name, API base URL, and API key, then fetch or enter the model to use. Internal identifiers are generated automatically. Protocol selection is under Advanced settings. Supported protocols are OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages.
 
-Each browser can persistently save up to **3 custom API configurations**, with editing, deletion, and switching supported. A configuration can contain multiple models. Click a model in the list to make it the default; when using the configuration, you can select another model or enter an ID outside the saved list. API URLs must use public HTTPS endpoints. If model discovery is unavailable, add model IDs manually. Configurations and keys stay in the current browser and do not sync across browsers or devices. During a request, the key is temporarily passed to the backend; it is not written to server-side sessions, files, or logs.
+Each browser can persistently save up to **3 custom API configurations**, with editing, deletion, and switching supported. A configuration can contain multiple models. Click a model in the list to make it the default; when using the configuration, you can select another model or enter an ID outside the saved list. API URLs must use public HTTPS endpoints. If model discovery is unavailable, enter a model name directly or expand the manual model section to maintain a list. Configurations and keys stay in the current browser and do not sync across browsers or devices. During a request, the key is temporarily passed to the backend; it is not written to server-side sessions, files, or logs.
 
-The workspace and model settings show the model ID and protocol configured by the site operator. Operators can select a protocol with `RESUME_LLM_PROTOCOL`; the frontend does not receive the site's API key or base URL. A model ID may be a provider-defined alias, so consult the provider for the underlying model.
+The workspace and model settings show the name of the site-provided model. Its communication protocol is not shown in the regular interface. Operators can select a protocol with `RESUME_LLM_PROTOCOL`; the frontend does not receive the site's API key or base URL. A model ID may be a provider-defined alias, so consult the provider for the underlying model.
 
 The default output budget is 8192 tokens per call, configurable through `RESUME_LLM_OUTPUT_TOKENS`. Reasoning tokens may also count toward this budget. If output is truncated, the app shows an error and preserves the original resume so you can switch models and retry.
 

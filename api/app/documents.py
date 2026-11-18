@@ -98,7 +98,7 @@ def resume_from_parts(parts, warnings=None, estimated_pages=None):
             raise Problem("PARAGRAPH_TOO_LONG", "单段文字过长，请先整理简历内容。", 422)
         total += len(text)
         if total > 30000:
-            raise Problem("CONTEXT_TOO_LONG", "简历文字超过处理范围，请精简后重试；系统不会静默截断。", 422)
+            raise Problem("CONTEXT_TOO_LONG", "简历文字过多，请精简后重试。", 422)
         heading_kind = next(
             (kind for kind, names in SECTION_NAMES
              if re.sub(r"\s+", "", text).strip(":：").casefold() in names), None
@@ -170,7 +170,7 @@ def parse_docx(raw: bytes) -> Resume:
                         warnings.append("页眉或页脚中的文字未作为简历正文读取；请核对姓名与联系方式，必要时放入正文后重传。")
                         break
             if root.findall(".//" + W + "txbxContent"):
-                warnings.append("已读取文本框内容，按其在正文中的锚点排列；请核对姓名、联系方式与经历顺序。")
+                warnings.append("请核对文本框中的姓名、联系方式和经历顺序。")
             columns = root.findall(".//" + W + "cols")
             if any(int(c.attrib.get(W + "num", "1")) > 1 for c in columns):
                 warnings.append("原简历使用分栏，请核对提取顺序；导出会统一为单栏。")
@@ -183,7 +183,7 @@ def parse_docx(raw: bytes) -> Resume:
                     if element.tag.endswith("}Pages") and (element.text or "").isdigit():
                         page_estimate = int(element.text)
         if root.find(".//" + W + "tbl") is not None:
-            warnings.append("已将表格内容按行提取；请核对单位、日期与经历的对应关系。")
+            warnings.append("请核对表格中的单位、日期与经历是否对应。")
         body = root.find(W + "body")
         if body is None:
             raise ValueError("Missing body")

@@ -5,18 +5,17 @@ import { fromCustomAPI, modelIDPattern, modelRequest, protocolNames } from '../l
 import type { CustomAPI } from '../lib/types';
 
 type Props = {initial:CustomAPI; editing:boolean; onSave:(profile:CustomAPI)=>void; onCancel:()=>void};
-type Errors = Partial<Record<'id'|'name'|'base_url'|'key'|'model',string>>;
+type Errors = Partial<Record<'name'|'base_url'|'key'|'model',string>>;
 
 function validate(profile:CustomAPI):Errors {
   const errors:Errors={};
-  if(!/^[a-z][a-z0-9_-]{0,39}$/.test(profile.id)) errors.id='以小写字母开头，可使用字母、数字、下划线和短横线，最多 40 字符。';
-  if(!profile.name.trim()) errors.name='请填写显示名称。';
+  if(!profile.name.trim()) errors.name='请为这组 API 起个名称。';
   try {
     const url=new URL(profile.base_url);
     if(url.protocol!=='https:'||url.username||url.password||url.search||url.hash) throw new Error();
-  } catch {errors.base_url='请填写公网 HTTPS API 根地址，不要包含账号或查询参数。';}
+  } catch {errors.base_url='请填写服务商提供的 HTTPS 基础地址。';}
   if(!/^[\x21-\x7e]{1,512}$/.test(profile.key.trim())) errors.key='请填写 API Key，不能包含空格或换行。';
-  if(!modelIDPattern.test(profile.model.trim())) errors.model='请填写该服务支持的默认模型 ID。';
+  if(!modelIDPattern.test(profile.model.trim())) errors.model='请选择或填写该服务支持的模型名称。';
   return errors;
 }
 
@@ -40,7 +39,7 @@ export default function CustomAPIEditor({initial,editing,onSave,onCancel}:Props)
     e.preventDefault();
     const cleaned={...profile,name:profile.name.trim(),base_url:profile.base_url.trim().replace(/\/+$/,''),key:profile.key.trim(),model:profile.model.trim()};
     const invalid=validate(cleaned);setErrors(invalid);
-    if(Object.keys(invalid).length){notify('请检查标出的配置项。',true);requestAnimationFrame(()=>feedback.current?.focus());return;}
+    if(Object.keys(invalid).length){notify('请检查标出的内容。',true);requestAnimationFrame(()=>feedback.current?.focus());return;}
     cleaned.models=[...new Set([cleaned.model,...cleaned.models])].slice(0,100);
     onSave(cleaned);
   }
@@ -55,41 +54,35 @@ export default function CustomAPIEditor({initial,editing,onSave,onCancel}:Props)
       });
       if(active.signal.aborted)return;
       setProfile(current=>({...current,models:[...new Set([...current.models,...result.models])].slice(0,100),model:current.model||result.models[0]||''}));
-      notify(`已获取 ${result.models.length} 个模型，可选择或手动填写模型 ID。`);
-    } catch(e){if(!active.signal.aborted)notify(e instanceof Error?e.message:'获取失败，可以手动填写模型 ID。',true);}
+      notify(`已获取 ${result.models.length} 个模型。`);
+    } catch(e){if(!active.signal.aborted)notify(e instanceof Error?e.message:'获取失败，请手动填写模型名称。',true);}
     finally{if(!active.signal.aborted)setFetching(false);}
   }
   function addModel(){
     const model=newModel.trim();
-    if(!modelIDPattern.test(model)){notify('请输入有效的模型 ID。',true);return;}
-    if(profile.models.length>=100&&!profile.models.includes(model)){notify('模型目录最多保留 100 项，请先移除不需要的模型。',true);return;}
+    if(!modelIDPattern.test(model)){notify('请输入有效的模型名称。',true);return;}
+    if(profile.models.length>=100&&!profile.models.includes(model)){notify('最多保存 100 个模型，请先移除不需要的模型。',true);return;}
     setProfile({...profile,models:[...new Set([...profile.models,model])],model:profile.model||model});setNewModel('');notify('');
   }
   function fieldError(field:keyof Errors){return errors[field]?<p id={`custom-${field}-error`} className="field-error">{errors[field]}</p>:null;}
   return <form className="settings-form custom-api-form" onSubmit={submit} noValidate>
     {message&&<p ref={feedback} tabIndex={-1} role={failed?'alert':'status'} className={failed?'field-error model-feedback':'model-feedback'}>{message}</p>}
-    <label htmlFor="custom-id">Provider ID</label>
-    <input id="custom-id" value={profile.id} disabled={editing} onChange={e=>setProfile({...profile,id:e.target.value})} onBlur={()=>blur('id')} placeholder="my-gateway" maxLength={40} autoComplete="off" required aria-invalid={!!errors.id} aria-describedby="custom-id-hint custom-id-error"/>
-    <p id="custom-id-hint" className="field-hint">唯一标识，创建后不可修改。</p>{fieldError('id')}
-    <label htmlFor="custom-name">显示名称</label>
+    <label htmlFor="custom-name">名称</label>
     <input id="custom-name" value={profile.name} onChange={e=>setProfile({...profile,name:e.target.value})} onBlur={()=>blur('name')} maxLength={60} placeholder="我的模型服务" autoComplete="off" required aria-invalid={!!errors.name} aria-describedby="custom-name-error"/>{fieldError('name')}
     <label htmlFor="custom-url">API 地址</label>
     <input id="custom-url" type="url" value={profile.base_url} disabled={fetching} onChange={e=>setProfile({...profile,base_url:e.target.value})} onBlur={()=>blur('base_url')} placeholder="https://api.example.com/v1" maxLength={2048} autoComplete="off" required aria-invalid={!!errors.base_url} aria-describedby="custom-url-hint custom-base_url-error"/>
-    <p id="custom-url-hint" className="field-hint">填写根地址，无需添加 /chat/completions 等接口路径。</p>{fieldError('base_url')}
-    <label htmlFor="custom-protocol">API 协议</label>
-    <select id="custom-protocol" value={profile.protocol} disabled={fetching} onChange={e=>setProfile({...profile,protocol:e.target.value as CustomAPI['protocol']})}>{Object.entries(protocolNames).map(([value,name])=><option key={value} value={value}>{name}</option>)}</select>
+    <p id="custom-url-hint" className="field-hint">填写服务商提供的基础地址。</p>{fieldError('base_url')}
     <label htmlFor="custom-key">API Key</label>
     <div className="api-key-input"><input id="custom-key" type={showKey?'text':'password'} value={profile.key} disabled={fetching} onChange={e=>setProfile({...profile,key:e.target.value})} onBlur={()=>blur('key')} maxLength={512} autoComplete="off" required aria-invalid={!!errors.key} aria-describedby="custom-key-error"/><button type="button" className="icon-button" aria-label={showKey?'隐藏 API Key':'显示 API Key'} aria-pressed={showKey} onClick={()=>setShowKey(!showKey)}>{showKey?<EyeOff size={18}/>:<Eye size={18}/>}</button></div>{fieldError('key')}
     <div className="model-catalog">
-      <div className="model-catalog-heading"><h3>模型目录 <span>{profile.models.length} 个</span></h3><button type="button" className="text-button" onClick={fetchModels} disabled={fetching} aria-busy={fetching}>{fetching?<><LoaderCircle className="spin" size={14}/>正在获取…</>:'获取可用模型'}</button></div>
-      <p className="field-hint">点击模型设为默认，也可手动添加。</p>
-      {profile.models.length>0?<div className="model-chips">{profile.models.map(model=><span key={model} className={profile.model===model?'selected':''}><button className="model-choice" type="button" aria-pressed={profile.model===model} aria-label={`设为默认模型 ${model}`} onClick={()=>setProfile({...profile,model})}>{model}</button><button type="button" aria-label={`移除模型 ${model}`} onClick={()=>{const models=profile.models.filter(m=>m!==model);setProfile({...profile,models,model:profile.model===model?models[0]??'':profile.model});}}><X size={13}/></button></span>)}</div>:<p className="model-catalog-empty">尚未添加模型。获取可用模型，或在下方手动添加。</p>}
-      <div className="add-model-row"><input aria-label="添加模型 ID" value={newModel} onChange={e=>setNewModel(e.target.value)} onCompositionEnd={e=>{compositionEndedAt.current=e.timeStamp;}} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();if(e.nativeEvent.isComposing||(compositionEndedAt.current!==null&&Math.abs(e.timeStamp-compositionEndedAt.current)<50))return;addModel();}}} placeholder="例如 gpt-6-luna" maxLength={100} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false}/><button className="button quiet" type="button" onClick={addModel}><Plus size={15}/>添加模型</button></div>
+      <div className="model-catalog-heading"><h3>可用模型 <span>{profile.models.length} 个</span></h3><button type="button" className="text-button" onClick={fetchModels} disabled={fetching} aria-busy={fetching}>{fetching?<><LoaderCircle className="spin" size={14}/>正在获取…</>:'获取可用模型'}</button></div>
+      {profile.models.length>0&&<div className="model-chips">{profile.models.map(model=><span key={model} className={profile.model===model?'selected':''}><button className="model-choice" type="button" aria-pressed={profile.model===model} aria-label={`设为默认模型 ${model}`} onClick={()=>setProfile({...profile,model})}>{model}</button><button type="button" aria-label={`移除模型 ${model}`} onClick={()=>{const models=profile.models.filter(m=>m!==model);setProfile({...profile,models,model:profile.model===model?models[0]??'':profile.model});}}><X size={13}/></button></span>)}</div>}
+      <details className="manual-model-entry"><summary>手动添加模型</summary><div className="add-model-row"><input aria-label="添加模型名称" value={newModel} onChange={e=>setNewModel(e.target.value)} onCompositionEnd={e=>{compositionEndedAt.current=e.timeStamp;}} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();if(e.nativeEvent.isComposing||(compositionEndedAt.current!==null&&Math.abs(e.timeStamp-compositionEndedAt.current)<50))return;addModel();}}} placeholder="填写模型名称" maxLength={100} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false}/><button className="button quiet" type="button" onClick={addModel}><Plus size={15}/>添加模型</button></div></details>
     </div>
-    <label htmlFor="custom-model">默认模型 ID</label>
-    <input id="custom-model" list="custom-models" value={profile.model} onChange={e=>setProfile({...profile,model:e.target.value})} onBlur={()=>blur('model')} placeholder="选择或填写模型 ID" maxLength={100} autoComplete="off" required aria-invalid={!!errors.model} aria-describedby="custom-model-error"/>
+    <label htmlFor="custom-model">使用的模型</label>
+    <input id="custom-model" list="custom-models" value={profile.model} onChange={e=>setProfile({...profile,model:e.target.value})} onBlur={()=>blur('model')} placeholder="选择或填写模型名称" maxLength={100} autoComplete="off" required aria-invalid={!!errors.model} aria-describedby="custom-model-error"/>
     <datalist id="custom-models">{profile.models.map(model=><option key={model} value={model}/>)}</datalist>{fieldError('model')}
-    <p className="field-hint">Key 保存在此浏览器，请勿在公用设备上保存。</p>
+    <details className="api-advanced"><summary>高级设置</summary><label htmlFor="custom-protocol">API 协议</label><select id="custom-protocol" value={profile.protocol} disabled={fetching} onChange={e=>setProfile({...profile,protocol:e.target.value as CustomAPI['protocol']})}>{Object.entries(protocolNames).map(([value,name])=><option key={value} value={value}>{name}</option>)}</select></details>
     <div className="dialog-actions"><button type="button" className="text-button" onClick={onCancel}>取消</button><button className="button primary" type="submit" disabled={fetching}>{editing?'保存并使用':'创建并使用'}</button></div>
   </form>;
 }

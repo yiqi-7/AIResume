@@ -15,7 +15,7 @@ EXTRACTION_ERRORS = {
     "PDF_TEXT_UNREADABLE": "PDF 的文字编码无法完整读取，请从原始 Word 重新导出 PDF。",
     "CORRUPT_PDF": "这份 PDF 无法完整读取，请从原始文档重新导出后重试。",
     "EMPTY_RESUME": "读取到的文字太少，请确认文件中包含可选择的简历正文。",
-    "CONTEXT_TOO_LONG": "简历文字超过处理范围，请精简后重试；系统不会静默截断。",
+    "CONTEXT_TOO_LONG": "简历文字过多，请精简后重试。",
     "PARAGRAPH_TOO_LONG": "单段文字过长，请先整理简历内容。",
     "STRUCTURE_UNSUPPORTED": "检测到无法完整读取的 Word 结构，请另存为普通 DOCX 后重试。",
     "CORRUPT_DOCX": "Word 转换结果无法完整读取，请另存为普通 DOCX 后重试。",
@@ -76,20 +76,20 @@ class PageChecker:
                 if code in EXTRACTION_ERRORS:
                     raise Problem(code, EXTRACTION_ERRORS[code], 422)
                 raise Problem(
-                    "PAGECHECK_FAILED", "无法完整读取文件或校验页数，请另存为普通 Word 或文字型 PDF 后重试。", 422,
+                    "PAGECHECK_FAILED", "无法完整读取文件，请另存为普通 Word 或文字型 PDF 后重试。", 422,
                 )
             response.raise_for_status()
             pages = response.json()["pages"]
             if type(pages) is not int or pages < 1:
                 raise ValueError("Invalid page count")
             if pages > MAX_PAGES:
-                raise Problem("PAGE_LIMIT", "服务器排版结果超过 8 页，请精简简历后重试。", 422)
+                raise Problem("PAGE_LIMIT", "简历超过 8 页，请精简后重试。", 422)
             return response.json()
         except Problem:
             raise
         except (httpx.HTTPError, TimeoutError, ValueError, KeyError, TypeError):
             raise Problem(
-                "PAGECHECK_UNAVAILABLE", "页数校验服务暂不可用，材料尚未保存，请稍后重试。", 503,
+                "PAGECHECK_UNAVAILABLE", "暂时无法读取文件，材料尚未保存，请稍后重试。", 503,
             ) from None
 
     async def close(self):

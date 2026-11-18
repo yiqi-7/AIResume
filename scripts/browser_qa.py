@@ -117,6 +117,9 @@ def main():
 
             def capture(name):
                 page.evaluate("document.fonts.ready")
+                visible_copy = page.locator("body").inner_text()
+                for internal_copy in ("Provider ID", "创建后不可修改", "候选建议未通过依据校验", "正式上线前", "请确认服务已启动", "已校验页数", "服务端在响应完成后"):
+                    assert internal_copy not in visible_copy, (name, internal_copy)
                 assert page.evaluate("document.fonts.check('14px \"Noto Sans SC Variable\"', '简历')")
                 assert page.evaluate("[...document.fonts].some(f=>f.family.includes('Noto Sans SC') && f.status==='loaded')")
                 assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1"), name
@@ -179,10 +182,7 @@ def main():
             capture_large_text('review-large-text')
             page.set_viewport_size({"width": 1440, "height": 1050})
             capture("review-desktop")
-            page.get_by_role("button", name="模型设置").click()
-            expect(page.get_by_role("dialog")).to_be_visible()
-            page.keyboard.press("Escape")
-            expect(page.get_by_role("dialog")).not_to_be_visible()
+            expect(page.get_by_role("button", name="模型设置")).to_have_count(0)
 
             page.goto("http://127.0.0.1:4322/app/", wait_until="networkidle")
             retained = {'id': 'migration-kept', 'name': '迁移保留验证',
@@ -202,8 +202,8 @@ def main():
             page.evaluate("localStorage.removeItem('airesume-model-v1');localStorage.removeItem('airesume-custom-apis-v1')")
             page.reload(wait_until='networkidle')
             page.get_by_role('button', name='模型设置').click()
-            expect(page.get_by_role('combobox', name='模型服务', exact=True)).to_contain_text('DeepSeek')
-            assert page.get_by_role('combobox', name='模型服务', exact=True).locator('option').all_text_contents() == ['站方模型', 'DeepSeek · 自己的 Key']
+            expect(page.get_by_role('combobox', name='选择服务', exact=True)).to_contain_text('DeepSeek')
+            assert page.get_by_role('combobox', name='选择服务', exact=True).locator('option').all_text_contents() == ['默认模型', 'DeepSeek · 自己的 Key']
             capture('model-settings-clean-desktop')
             page.set_viewport_size({"width": 320, "height": 844})
             capture_large_text('model-settings-large-text')
@@ -267,7 +267,7 @@ def main():
             page.get_by_role("button", name="适合屏幕").click()
             page.get_by_role("button", name="导出 Word", exact=True).click()
             with page.expect_download() as downloaded:
-                page.get_by_role("button", name="确认导出 Word", exact=True).click()
+                page.get_by_role("button", name="导出并清除资料", exact=True).click()
             downloaded.value.save_as(str(OUT / "exported.docx"))
             expect(page.get_by_text("下载已发起", exact=False)).to_be_visible()
             expect(page.get_by_role("heading", name="上传简历")).to_be_visible()
@@ -281,8 +281,8 @@ def main():
             expect(page.get_by_role("heading", name="核对简历内容")).to_be_visible()
             expect(page.get_by_text("Fictional Candidate - 2024 - fictional@example.invalid", exact=True)).to_be_visible()
             capture("pdf-parsed-mobile")
-            page.get_by_role("button", name="结束会话", exact=True).click()
-            page.get_by_role("button", name="确认结束", exact=True).click()
+            page.get_by_role("button", name="清除本次资料", exact=True).click()
+            page.get_by_role("button", name="确认清除", exact=True).click()
             expect(page.get_by_role("heading", name="上传简历")).to_be_visible()
             # Three persistent custom profiles, catalog/manual models, both protocols,
             # editing/deletion and a real UI -> API -> mocked upstream analysis.
@@ -290,19 +290,21 @@ def main():
             expect(page.locator('.current-model')).to_contain_text('test-model')
             page.get_by_role('button', name='模型设置').click()
             expect(page.locator('.station-model-info')).to_contain_text('test-model')
-            expect(page.locator('.station-model-info')).to_contain_text('OpenAI Chat Completions')
+            expect(page.locator('.station-model-info')).not_to_contain_text('OpenAI Chat Completions')
+            expect(page.get_by_role('button', name='清空全部 Key', exact=True)).to_have_count(0)
             capture('station-model-visible')
             page.get_by_role('button', name='关闭模型设置', exact=True).click()
             for index in range(1, 4):
                 page.get_by_role("button", name="模型设置").click()
                 page.get_by_role("tab", name="自定义 API").click()
                 page.get_by_role("button", name="添加自定义 API", exact=True).click()
-                page.get_by_label("Provider ID", exact=True).fill(f"custom-{index}")
-                page.get_by_label("显示名称", exact=True).fill(f"虚构服务 {index}")
+                expect(page.get_by_label("Provider ID", exact=True)).to_have_count(0)
+                page.get_by_label("名称", exact=True).fill(f"虚构服务 {index}")
                 page.get_by_label("API 地址", exact=True).fill("https://provider.example.invalid/v1")
                 page.get_by_label("API Key", exact=True).fill(f"synthetic-browser-key-{index}")
                 if index == 2:
-                    model_input = page.get_by_label("添加模型 ID", exact=True)
+                    page.locator(".manual-model-entry > summary").click()
+                    model_input = page.get_by_label("添加模型名称", exact=True)
                     model_input.fill("gpt-6-luna")
                     model_input.dispatch_event('keydown', {'key': 'Enter', 'code': 'Enter', 'isComposing': True})
                     expect(model_input).to_have_value('gpt-6-luna')
@@ -325,13 +327,14 @@ def main():
                     page.get_by_role("button", name="获取可用模型", exact=True).click()
                     expect(page.get_by_text("已获取 2 个模型", exact=False)).to_be_visible()
                 if index == 3:
+                    page.locator(".api-advanced > summary").click()
                     page.get_by_label("API 协议", exact=True).select_option("anthropic_messages")
                     page.set_viewport_size({"width": 390, "height": 844})
                     capture_large_text('custom-api-large-text')
                 if index == 1:
                     expect(page.locator('.model-chips>span')).to_have_count(2)
                     page.get_by_role('button', name='设为默认模型 test-model', exact=True).click()
-                    expect(page.get_by_label('默认模型 ID', exact=True)).to_have_value('test-model')
+                    expect(page.get_by_label('使用的模型', exact=True)).to_have_value('test-model')
                 capture(f"custom-api-editor-{'mobile' if index == 3 else 'desktop'}")
                 page.get_by_role("button", name="创建并使用", exact=True).click()
                 expect(page.get_by_role("dialog")).not_to_be_visible()
@@ -339,13 +342,15 @@ def main():
             page.get_by_role("button", name="模型设置").click()
             expect(page.get_by_role("tab", name="自定义 API")).to_have_attribute("aria-selected", "true")
             expect(page.locator(".custom-api-card")).to_have_count(3)
+            generated_ids = page.evaluate("JSON.parse(localStorage.getItem('airesume-custom-apis-v1')).map(p=>p.id)")
+            assert len(set(generated_ids)) == 3 and all(value.startswith("api-") and len(value) == 40 for value in generated_ids)
             third = page.locator('.custom-api-card').filter(has=page.get_by_role('heading', name='虚构服务 3', exact=True))
             third.get_by_label('本次使用的模型 · 虚构服务 3', exact=True).fill('test-model')
             third.get_by_role('button', name='使用', exact=True).click()
             page.reload(wait_until='networkidle')
             expect(page.locator('.current-model')).to_contain_text('test-model')
             # This uses a catalog model without replacing the profile's default.
-            assert page.evaluate("JSON.parse(localStorage.getItem('airesume-custom-apis-v1')).find(p=>p.id==='custom-3').model") == 'gpt-6-luna'
+            assert page.evaluate("JSON.parse(localStorage.getItem('airesume-custom-apis-v1')).find(p=>p.name==='虚构服务 3').model") == 'gpt-6-luna'
             page.get_by_label('选择 Word 或 PDF 简历').set_input_files(str(sample))
             page.get_by_label('目标岗位描述').fill('能够进行需求分析，并将需求转化为产品原型。与设计和研发同学沟通需求。具备清晰的书面表达与协作能力。')
             page.get_by_role('checkbox').check()
@@ -356,8 +361,8 @@ def main():
             assert anthropic.value.post_data_json['protocol'] == 'anthropic_messages'
             assert anthropic.value.post_data_json['model'] == 'test-model'
             expect(page.get_by_role('heading', name='修改建议')).to_be_visible(timeout=20000)
-            page.get_by_role('button', name='结束会话', exact=True).click()
-            page.get_by_role('button', name='确认结束', exact=True).click()
+            page.get_by_role('button', name='清除本次资料', exact=True).click()
+            page.get_by_role('button', name='确认清除', exact=True).click()
             expect(page.get_by_role('heading', name='上传简历')).to_be_visible()
             page.get_by_role('button', name='模型设置').click()
             expect(page.get_by_role("button", name="添加自定义 API", exact=True)).to_be_disabled()
@@ -372,17 +377,18 @@ def main():
             expect(page.get_by_role('heading', name='核对简历内容')).to_be_visible()
             page.get_by_role('button', name='读取无误，开始分析').click()
             expect(page.get_by_role('heading', name='这次分析没有完成')).to_be_visible(timeout=20000)
-            expect(page.locator('.analysis-failure')).to_contain_text('拒绝网页应用调用')
+            expect(page.locator('.analysis-failure')).to_contain_text('不支持本网站调用')
             expect(page.locator('.analysis-failure')).not_to_contain_text('synthetic-private-marker')
             capture('model-restriction-actionable-error')
-            page.get_by_role('button', name='结束会话', exact=True).click()
-            page.get_by_role('button', name='确认结束', exact=True).click()
+            page.get_by_role('button', name='清除本次资料', exact=True).click()
+            page.get_by_role('button', name='确认清除', exact=True).click()
             expect(page.get_by_role('heading', name='上传简历')).to_be_visible()
             page.get_by_role('button', name='模型设置').click()
             card = page.locator(".custom-api-card").filter(has=page.get_by_role("heading", name="虚构服务 2", exact=True))
             card.get_by_role("button", name="编辑", exact=True).click()
-            expect(page.get_by_label("Provider ID", exact=True)).to_be_disabled()
-            page.get_by_label("显示名称", exact=True).fill("虚构服务 2 已更新")
+            expect(page.get_by_label("Provider ID", exact=True)).to_have_count(0)
+            page.get_by_label("名称", exact=True).fill("虚构服务 2 已更新")
+            page.locator(".api-advanced > summary").click()
             page.get_by_label("API 协议", exact=True).select_option("responses")
             page.get_by_role("button", name="保存并使用", exact=True).click()
             page.get_by_role("button", name="模型设置").click()
@@ -391,6 +397,7 @@ def main():
             expect(page.locator(".custom-api-card")).to_have_count(2)
             expect(page.get_by_role("button", name="添加自定义 API", exact=True)).to_be_enabled()
             page.get_by_role("button", name="完成", exact=True).click()
+            assert page.evaluate("JSON.parse(localStorage.getItem('airesume-custom-apis-v1')).map(p=>p.id)") == generated_ids[1:]
             # Reload proves the active profile, address, protocol and Key are restored.
             page.reload(wait_until="networkidle")
             page.get_by_label("选择 Word 或 PDF 简历").set_input_files(str(sample))
@@ -405,8 +412,8 @@ def main():
             assert submitted.value.post_data_json["base_url"] == "https://provider.example.invalid/v1"
             assert submitted.value.headers["x-llm-key"] == "synthetic-browser-key-2"
             expect(page.get_by_role("heading", name="修改建议")).to_be_visible(timeout=20000)
-            page.get_by_role("button", name="结束会话", exact=True).click()
-            page.get_by_role("button", name="确认结束", exact=True).click()
+            page.get_by_role("button", name="清除本次资料", exact=True).click()
+            page.get_by_role("button", name="确认清除", exact=True).click()
             expect(page.get_by_role("heading", name="上传简历")).to_be_visible()
             assert page.evaluate("JSON.parse(localStorage.getItem('airesume-custom-apis-v1')).length") == 2
             page.get_by_role("button", name="模型设置").click()

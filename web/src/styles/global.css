@@ -228,6 +228,7 @@ summary { cursor: pointer; font-weight: 500; padding-block: 10px; }
 .suggestion-detail h2 { font-size: 1.3125rem; font-weight: 500; }
 .suggestion-reason { color: var(--muted); font-size: 0.875rem; line-height: 2; margin-top: 12px; }
 .evidence-grid { display: grid; grid-template-columns: 1fr 1fr; margin-top: 25px; gap: 20px; border-top: 1px solid var(--line); padding-top: 20px; }
+.evidence-grid.single { grid-template-columns: 1fr; }
 .evidence-grid h3 { font-size: 0.875rem; font-weight: 500; color: var(--muted); margin-bottom: 9px; }
 .evidence-grid blockquote { margin: 0; border-left: 2px solid #cad5ed; padding-left: 11px; color: #52617a; font-size: 0.875rem; line-height: 2; white-space: pre-wrap; overflow-wrap: anywhere; }
 .evidence-grid p { font-size: 0.875rem; line-height: 2; }
@@ -304,6 +305,10 @@ summary { cursor: pointer; font-weight: 500; padding-block: 10px; }
 .add-api { width: 100%; }
 .custom-api-form .field-hint { margin-top: 7px; font-size: 0.875rem; }
 .custom-api-form .field-error { margin-top: 6px; font-size: 0.875rem; }
+.api-advanced, .manual-model-entry { margin-top: 16px; }
+.api-advanced summary, .manual-model-entry summary { cursor: pointer; }
+.api-advanced>label { display: block; margin-block: 14px 7px; }
+.api-advanced>select { width: 100%; font-size: 1rem; }
 .api-key-input { display: flex; align-items: center; gap: 5px; }
 .api-key-input input { min-width: 0; flex: 1; }
 .api-key-input .icon-button { width: 44px; height: 44px; }
