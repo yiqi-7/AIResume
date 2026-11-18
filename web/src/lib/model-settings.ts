@@ -44,7 +44,11 @@ export function loadModelSettings():ModelSettings {
       const model=typeof saved.model==='string'&&modelIDPattern.test(saved.model)?saved.model:profile?.model;
       return profile?fromCustomAPI(profile,model):stationSettings;
     }
-    if (saved && ['deepseek','qwen','zhipu'].includes(saved.provider)
+    if (saved && ['qwen','zhipu'].includes(saved.provider)) {
+      localStorage.removeItem(modelStorageKey);
+      return stationSettings;
+    }
+    if (saved?.provider==='deepseek'
       && typeof saved.model==='string' && typeof saved.key==='string') return saved;
   } catch { /* A blocked store leaves the station default available. */ }
   return stationSettings;

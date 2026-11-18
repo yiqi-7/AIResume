@@ -82,13 +82,13 @@ export default function ModelDialog({open,onOpenChange,settings,config,onSave}:P
       event.preventDefault();setTab(next);document.getElementById(`${next}-tab`)?.focus();
     }
   }
-  const providers=config?.providers??[{id:'deepseek',name:'DeepSeek'},{id:'qwen',name:'通义千问'},{id:'zhipu',name:'智谱'}];
+  const providers=(config?.providers??[{id:'deepseek',name:'DeepSeek'}]).filter(p=>p.id==='deepseek');
   return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal><Dialog.Overlay className="dialog-overlay"/><Dialog.Content className="dialog-content model-dialog">
     <Dialog.Title>模型设置</Dialog.Title>
-    <Dialog.Description>选择分析使用的服务。简历文字与岗位描述会发送给所选 API。</Dialog.Description>
+    <Dialog.Description className="sr-only">设置本次简历分析使用的模型服务。</Dialog.Description>
     <div className="model-tabs" role="tablist" aria-label="API 配置类型">
-      <button role="tab" id="builtin-tab" aria-controls="builtin-panel" aria-selected={tab==='builtin'} tabIndex={tab==='builtin'?0:-1} onKeyDown={e=>moveTab(e,'custom')} onClick={()=>{setTab('builtin');setEditing(null);setError('');}}>第三方模型服务</button>
-      <button role="tab" id="custom-tab" aria-controls="custom-panel" aria-selected={tab==='custom'} tabIndex={tab==='custom'?0:-1} onKeyDown={e=>moveTab(e,'builtin')} onClick={()=>{setTab('custom');setError('');}}>自定义模型 API <span>{profiles.length}/3</span></button>
+      <button role="tab" id="builtin-tab" aria-controls="builtin-panel" aria-selected={tab==='builtin'} tabIndex={tab==='builtin'?0:-1} onKeyDown={e=>moveTab(e,'custom')} onClick={()=>{setTab('builtin');setEditing(null);setError('');}}>模型服务</button>
+      <button role="tab" id="custom-tab" aria-controls="custom-panel" aria-selected={tab==='custom'} tabIndex={tab==='custom'?0:-1} onKeyDown={e=>moveTab(e,'builtin')} onClick={()=>{setTab('custom');setError('');}}>自定义 API <span>{profiles.length}/3</span></button>
     </div>
     {error&&<p ref={feedback} tabIndex={-1} role="alert" className="field-error model-feedback">{error}</p>}
     {notice&&<p role="status" className="model-feedback">{notice}</p>}
@@ -98,12 +98,12 @@ export default function ModelDialog({open,onOpenChange,settings,config,onSave}:P
       {draft.provider!=='station'?<>
         <label htmlFor="model-name">模型 ID</label><input id="model-name" value={draft.model} onChange={e=>setDraft({...draft,model:e.target.value})} maxLength={100} autoComplete="off" required/>
         <label htmlFor="model-key">API Key</label><input id="model-key" type="password" value={draft.key} onChange={e=>setDraft({...draft,key:e.target.value})} autoComplete="off" maxLength={512} required/>
-        <label className="check-label"><input type="checkbox" checked={remember} onChange={e=>setRemember(e.target.checked)}/><span>在当前浏览器长期保存 Key</span></label>
-        <p className="field-hint">Key 仅用于所选服务，不写入后端存储。调用费用由对应服务商收取。</p>
-      </>:<div className="station-model-info"><h3>站方使用的模型</h3><strong>{config?.station_configured?config.station_model??'模型信息暂不可用，请刷新后重试':'尚未配置'}</strong>{config?.station_protocol&&<small>{protocolNames[config.station_protocol]}</small>}<p className="field-hint">{config?.station_configured?'分析会使用以上模型，受匿名体验额度限制。':'可以添加自己的 API 或先查看虚构示例。'}</p></div>}
+        <label className="check-label"><input type="checkbox" checked={remember} onChange={e=>setRemember(e.target.checked)}/><span>在此浏览器保存 Key</span></label>
+        <p className="field-hint">调用费用由服务商收取。</p>
+      </>:<div className="station-model-info"><h3>站方模型</h3><strong>{config?.station_configured?config.station_model??'模型信息暂不可用，请刷新后重试':'尚未配置'}</strong>{config?.station_protocol&&<small>{protocolNames[config.station_protocol]}</small>}{!config?.station_configured&&<p className="field-hint">可添加自定义 API 或查看示例。</p>}</div>}
       <div className="dialog-actions"><button type="button" className="text-button" onClick={clear}>清空全部 Key</button><button className="button primary" type="submit">保存设置</button></div>
     </form></div>:<div role="tabpanel" id="custom-panel" aria-labelledby="custom-tab">
-      <p className="field-hint model-storage-note">当前浏览器最多长期保存 3 组自定义 API。公用设备请勿保存；可随时修改或删除。</p>
+      <p className="field-hint model-storage-note">最多保存 3 组。配置和 Key 仅保存在此浏览器。</p>
       {editing?<CustomAPIEditor initial={editing} editing={!!editingId} onSave={saveCustom} onCancel={()=>{setEditing(null);setError('');setNotice('');}}/>:<>
         <div className="custom-api-list">{profiles.length?profiles.map(profile=><article className="custom-api-card" key={profile.id}>
           <div className="custom-api-heading"><h3>{profile.name}</h3>{settings.provider==='custom'&&settings.id===profile.id&&<span className="api-selected"><Check size={13}/>正在使用</span>}</div>
@@ -111,9 +111,8 @@ export default function ModelDialog({open,onOpenChange,settings,config,onSave}:P
           <label className="profile-model-label" htmlFor={`profile-model-${profile.id}`}>本次使用的模型 · {profile.name}</label>
           <input id={`profile-model-${profile.id}`} list={`profile-models-${profile.id}`} value={modelChoices[profile.id]??profile.model} onChange={e=>setModelChoices({...modelChoices,[profile.id]:e.target.value})} maxLength={100} autoComplete="off"/>
           <datalist id={`profile-models-${profile.id}`}>{[...new Set([profile.model,...profile.models])].map(model=><option key={model} value={model}/>)}</datalist>
-          <p className="field-hint">选择目录中的模型，也可直接填写目录外的模型 ID。</p>
           <div className="custom-api-actions"><button className="button quiet" onClick={()=>begin(profile)}><Pencil size={14}/>编辑</button><button className="button quiet" aria-label={`删除 ${profile.name}`} onClick={()=>removeProfile(profile.id)}><Trash2 size={14}/>删除</button><button className="button primary" onClick={()=>selectCustom(profile,modelChoices[profile.id]??profile.model)}>使用</button></div>
-        </article>):<div className="custom-api-empty"><h3>连接你自己的模型服务</h3><p>填写服务地址和 Key，选择模型后即可用于简历分析。</p></div>}</div>
+        </article>):<div className="custom-api-empty"><p>尚未添加自定义 API</p></div>}</div>
         <button className="button quiet add-api" onClick={()=>begin()} disabled={profiles.length>=maxCustomAPIs}><Plus size={16}/>添加自定义 API</button>
         {profiles.length>=maxCustomAPIs&&<p className="field-hint">已达到 3 组上限，删除一组后可以继续添加。</p>}
         <div className="dialog-actions"><button className="text-button" onClick={clear}>清空全部 Key</button><Dialog.Close className="button primary">完成</Dialog.Close></div>

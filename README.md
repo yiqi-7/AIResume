@@ -26,7 +26,7 @@ AIResume（叙职）是一款面向应届生与校招生的在线简历优化工
 
 ## 模型接入
 
-在工作台右上角打开「模型设置」，可以选择已有服务，也可以添加自己的 API。自定义配置包含 Provider ID、显示名称、API 地址、协议、Key 和模型目录，支持 OpenAI Chat Completions、OpenAI Responses 与 Anthropic Messages 三种协议。
+在工作台右上角打开「模型设置」，可以选择站方模型、使用自己的 DeepSeek Key，或添加自定义 API 接入其他服务。自定义配置包含 Provider ID、显示名称、API 地址、协议、Key 和模型目录，支持 OpenAI Chat Completions、OpenAI Responses 与 Anthropic Messages 三种协议。
 
 每个浏览器最多长期保存 **3 组自定义 API**，支持编辑、删除和切换。同一 API 可保存多个模型，点击目录中的模型设为默认；使用时也可选择其他模型，或直接填写目录外的模型 ID。地址须为公网 HTTPS；模型目录不可用时，可以手动添加模型 ID。配置与 Key 保存在当前浏览器，不跨浏览器或设备同步；调用时 Key 临时传递给后端，不写入服务端会话、文件或日志。
 
