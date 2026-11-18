@@ -150,7 +150,7 @@ async def test_pinned_connection_verifies_certificate_for_original_hostname(tmp_
         await server.wait_closed()
 
 
-@pytest.mark.parametrize("protocol", ["chat_completions", "responses"])
+@pytest.mark.parametrize("protocol", ["chat_completions", "responses", "anthropic_messages"])
 async def test_custom_protocols_preserve_json_grounding_and_byok_accounting(public_dns, protocol):
     settings = station()
     metadata = Metadata(settings)
@@ -160,7 +160,12 @@ async def test_custom_protocols_preserve_json_grounding_and_byok_accounting(publ
     def upstream(request):
         calls.append(request)
         payload = json.loads(request.content)
-        assert request.headers["Authorization"] == "Bearer " + KEY
+        if protocol == "anthropic_messages":
+            assert request.headers["x-api-key"] == KEY
+            assert request.headers["anthropic-version"] == "2023-06-01"
+            assert "authorization" not in request.headers
+        else:
+            assert request.headers["Authorization"] == "Bearer " + KEY
         content = json.dumps({"items": [candidate.model_dump()]})
         if protocol == "responses":
             assert request.url.path == "/v1/responses"
@@ -176,6 +181,14 @@ async def test_custom_protocols_preserve_json_grounding_and_byok_accounting(publ
                     "usage": {"input_tokens": 100, "output_tokens": 50},
                 },
             )
+        if protocol == "anthropic_messages":
+            assert request.url.path == "/v1/messages"
+            assert isinstance(payload["system"], str) and payload["system"]
+            assert payload["messages"][0]["role"] == "user"
+            assert "response_format" not in payload and "input" not in payload
+            return httpx.Response(200, json={"stop_reason": "end_turn", "content": [
+                {"type": "text", "text": content}],
+                "usage": {"input_tokens": 100, "output_tokens": 50}})
         assert request.url.path == "/v1/chat/completions" and "messages" in payload
         return response(content)
 
@@ -208,6 +221,23 @@ async def test_catalog_errors_do_not_reflect_secrets_or_follow_redirects(public_
         with pytest.raises(Problem) as error:
             await client.models(client.resolve("custom", "catalog", KEY, BASE))
         assert KEY not in error.value.message and len(calls) == 1
+    finally:
+        await client.close()
+
+
+async def test_anthropic_catalog_uses_version_and_api_key_without_bearer(public_dns):
+    def upstream(request):
+        assert request.url.path == "/v1/models"
+        assert request.headers["x-api-key"] == KEY
+        assert request.headers["anthropic-version"] == "2023-06-01"
+        assert "authorization" not in request.headers
+        return httpx.Response(200, json={"data": [{"id": "claude-synthetic"}, {"id": "other-model"}]})
+
+    settings = station()
+    client = ModelClient(settings, Metadata(settings), httpx.MockTransport(upstream))
+    try:
+        credentials = client.resolve("custom", "catalog", KEY, BASE, "anthropic_messages")
+        assert await client.models(credentials) == ["claude-synthetic", "other-model"]
     finally:
         await client.close()
 

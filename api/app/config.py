@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     data_encryption_key: SecretStr = SecretStr("")
     llm_base_url: str = ""
     llm_model: str = ""
+    llm_protocol: Literal["chat_completions", "responses", "anthropic_messages"] = "chat_completions"
+    llm_output_tokens: int = Field(8192, ge=256, le=32768)
     llm_api_key: SecretStr = SecretStr("")
     admin_token: SecretStr = SecretStr("")
     cookie_name: str = "resume_session"

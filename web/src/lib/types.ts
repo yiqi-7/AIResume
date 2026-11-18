@@ -14,7 +14,7 @@ export type Session = {
  resume: Resume; jd:string; suggestions:Suggestion[]; dimensions:Record<string,string>;
  error:string|null; revision:number;
 };
-export type APIProtocol = 'chat_completions' | 'responses';
+export type APIProtocol = 'chat_completions' | 'responses' | 'anthropic_messages';
 export type CustomAPI = {id:string; name:string; base_url:string; protocol:APIProtocol; key:string; models:string[]; model:string};
 export type ModelSettings = {provider:string; model:string; key:string; id?:string; name?:string; base_url?:string; protocol?:APIProtocol};
-export type Configuration = {station_configured:boolean; providers:{id:string;name:string}[]; upload_bytes:number; idle_seconds:number; hard_seconds:number; development:boolean};
+export type Configuration = {station_configured:boolean; station_model:string|null; station_protocol:APIProtocol|null; providers:{id:string;name:string}[]; upload_bytes:number; idle_seconds:number; hard_seconds:number; development:boolean};

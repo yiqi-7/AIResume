@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Eye, EyeOff, LoaderCircle, Plus, X } from 'lucide-react';
 import { modelHeaders, request } from '../lib/api';
-import { fromCustomAPI, modelIDPattern, modelRequest } from '../lib/model-settings';
+import { fromCustomAPI, modelIDPattern, modelRequest, protocolNames } from '../lib/model-settings';
 import type { CustomAPI } from '../lib/types';
 
 type Props = {initial:CustomAPI; editing:boolean; onSave:(profile:CustomAPI)=>void; onCancel:()=>void};
@@ -73,15 +73,15 @@ export default function CustomAPIEditor({initial,editing,onSave,onCancel}:Props)
     <input id="custom-name" value={profile.name} onChange={e=>setProfile({...profile,name:e.target.value})} onBlur={()=>blur('name')} maxLength={60} placeholder="我的模型服务" autoComplete="off" required aria-invalid={!!errors.name} aria-describedby="custom-name-error"/>{fieldError('name')}
     <label htmlFor="custom-url">API 地址</label>
     <input id="custom-url" type="url" value={profile.base_url} disabled={fetching} onChange={e=>setProfile({...profile,base_url:e.target.value})} onBlur={()=>blur('base_url')} placeholder="https://api.example.com/v1" maxLength={2048} autoComplete="off" required aria-invalid={!!errors.base_url} aria-describedby="custom-url-hint custom-base_url-error"/>
-    <p id="custom-url-hint" className="field-hint">填写 API 根地址及 /v1 等必要路径，无需填写 /chat/completions 或 /responses。</p>{fieldError('base_url')}
+    <p id="custom-url-hint" className="field-hint">填写 API 根地址及 /v1 等必要路径，无需填写 /chat/completions、/responses 或 /messages。</p>{fieldError('base_url')}
     <label htmlFor="custom-protocol">API 协议</label>
-    <select id="custom-protocol" value={profile.protocol} disabled={fetching} onChange={e=>setProfile({...profile,protocol:e.target.value as CustomAPI['protocol']})}><option value="chat_completions">OpenAI Chat Completions</option><option value="responses">OpenAI Responses</option></select>
+    <select id="custom-protocol" value={profile.protocol} disabled={fetching} onChange={e=>setProfile({...profile,protocol:e.target.value as CustomAPI['protocol']})}>{Object.entries(protocolNames).map(([value,name])=><option key={value} value={value}>{name}</option>)}</select>
     <label htmlFor="custom-key">API Key</label>
     <div className="api-key-input"><input id="custom-key" type={showKey?'text':'password'} value={profile.key} disabled={fetching} onChange={e=>setProfile({...profile,key:e.target.value})} onBlur={()=>blur('key')} maxLength={512} autoComplete="off" required aria-invalid={!!errors.key} aria-describedby="custom-key-error"/><button type="button" className="icon-button" aria-label={showKey?'隐藏 API Key':'显示 API Key'} onClick={()=>setShowKey(!showKey)}>{showKey?<EyeOff size={18}/>:<Eye size={18}/>}</button></div>{fieldError('key')}
     <div className="model-catalog">
-      <div className="model-catalog-heading"><h3>模型目录</h3><button type="button" className="text-button" onClick={fetchModels} disabled={fetching}>{fetching?<><LoaderCircle className="spin" size={14}/>正在获取…</>:'获取可用模型'}</button></div>
-      <p className="field-hint">目录接口不可用时，可以直接填写模型 ID。</p>
-      {profile.models.length>0&&<div className="model-chips">{profile.models.map(model=><span key={model}>{model}<button type="button" aria-label={`移除模型 ${model}`} onClick={()=>setProfile({...profile,models:profile.models.filter(m=>m!==model),model:profile.model===model?'':profile.model})}><X size={13}/></button></span>)}</div>}
+      <div className="model-catalog-heading"><h3>模型目录 <span>{profile.models.length} 个</span></h3><button type="button" className="text-button" onClick={fetchModels} disabled={fetching} aria-busy={fetching}>{fetching?<><LoaderCircle className="spin" size={14}/>正在获取…</>:'获取可用模型'}</button></div>
+      <p className="field-hint">同一 API 可添加多个模型。点击模型设为默认；目录接口不可用时，可手动填写模型 ID。</p>
+      {profile.models.length>0?<div className="model-chips">{profile.models.map(model=><span key={model} className={profile.model===model?'selected':''}><button className="model-choice" type="button" aria-pressed={profile.model===model} aria-label={`设为默认模型 ${model}`} onClick={()=>setProfile({...profile,model})}>{model}</button><button type="button" aria-label={`移除模型 ${model}`} onClick={()=>{const models=profile.models.filter(m=>m!==model);setProfile({...profile,models,model:profile.model===model?models[0]??'':profile.model});}}><X size={13}/></button></span>)}</div>:<p className="model-catalog-empty">尚未添加模型。获取可用模型，或在下方手动添加。</p>}
       <div className="add-model-row"><input aria-label="添加模型 ID" value={newModel} onChange={e=>setNewModel(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();addModel();}}} placeholder="例如 gpt-6-luna" maxLength={100} autoComplete="off"/><button className="button quiet" type="button" onClick={addModel}><Plus size={15}/>添加模型</button></div>
     </div>
     <label htmlFor="custom-model">默认模型 ID</label>

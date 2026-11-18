@@ -175,9 +175,12 @@ def create_app(settings: Settings | None = None, model_transport=None, pagecheck
 
     @app.get("/api/config")
     async def configuration():
+        configured = bool(settings.llm_base_url and settings.llm_model
+                          and settings.llm_api_key.get_secret_value())
         return {
-            "station_configured": bool(settings.llm_base_url and settings.llm_model
-                                       and settings.llm_api_key.get_secret_value()),
+            "station_configured": configured,
+            "station_model": settings.llm_model if configured else None,
+            "station_protocol": settings.llm_protocol if configured else None,
             "providers": [{"id": k, "name": v["name"]} for k, v in PROVIDERS.items()],
             "upload_bytes": settings.upload_bytes,
             "idle_seconds": settings.idle_seconds,

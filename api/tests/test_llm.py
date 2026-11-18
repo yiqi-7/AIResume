@@ -27,7 +27,7 @@ def sample():
 
 def station():
     return Settings(llm_base_url="https://model.example.invalid/v1", llm_model="test-model",
-                    llm_api_key=SecretStr("test-key-not-real"))
+                    llm_api_key=SecretStr("test-key-not-real"), llm_protocol="chat_completions")
 
 
 def response(content):
@@ -94,7 +94,7 @@ async def test_bad_key_is_not_retried_or_reflected():
         await client.close()
 
 
-async def test_success_envelope_with_plain_text_refusal_is_not_successful_analysis():
+async def test_success_envelope_with_client_restriction_keeps_actionable_error_without_retry():
     calls = []
     refusal = "仅限 Coding 客户端使用。synthetic-private-refusal"
 
@@ -106,9 +106,9 @@ async def test_success_envelope_with_plain_text_refusal_is_not_successful_analys
     client = ModelClient(settings, Metadata(settings), httpx.MockTransport(upstream))
     session, _ = sample()
     try:
-        with pytest.raises(Problem, match="MODEL_INVALID_OUTPUT") as error:
+        with pytest.raises(Problem, match="MODEL_CLIENT_RESTRICTED") as error:
             await client.dimension("content", session, client.resolve("station", "", None))
-        assert len(calls) == 2
+        assert len(calls) == 1
         assert refusal not in error.value.message
         assert "synthetic-private-refusal" not in error.value.message
     finally:
@@ -129,5 +129,113 @@ async def test_missing_station_and_byok_allowlist_and_fact_answer():
         text = await client.answer(session, candidate, "整理用户反馈，与同学核对原型。", credentials)
         assert text == "整理用户反馈，与同学核对原型。"
         assert "budget" not in json.dumps(client.metadata.values)
+    finally:
+        await client.close()
+
+
+@pytest.mark.parametrize("status,code,attempts", [
+    (400, "MODEL_REQUEST_REJECTED", 1),
+    (403, "MODEL_ACCESS_DENIED", 1),
+    (404, "MODEL_REQUEST_REJECTED", 1),
+    (429, "MODEL_RATE_LIMITED", 1),
+    (503, "MODEL_UPSTREAM", 2),
+])
+async def test_upstream_failures_keep_their_cause_instead_of_becoming_invalid_json(status, code, attempts):
+    calls = []
+
+    def upstream(request):
+        calls.append(request)
+        return httpx.Response(status, text="test-key-not-real private upstream detail")
+
+    settings = station()
+    client = ModelClient(settings, Metadata(settings), httpx.MockTransport(upstream))
+    session, _ = sample()
+    try:
+        with pytest.raises(Problem, match=code) as error:
+            await client.dimension("content", session, client.resolve("station", "", None))
+        assert len(calls) == attempts
+        assert "test-key-not-real" not in error.value.message
+        assert "private upstream detail" not in error.value.message
+    finally:
+        await client.close()
+
+
+@pytest.mark.parametrize("protocol", ["chat_completions", "responses", "anthropic_messages"])
+async def test_station_uses_its_configured_protocol_and_accounts_tokens(protocol):
+    settings = station().model_copy(update={"llm_protocol": protocol})
+    calls = []
+
+    def upstream(request):
+        calls.append(request)
+        if protocol == "responses":
+            assert request.url.path == "/v1/responses"
+            return httpx.Response(200, json={"status": "completed", "output": [
+                {"type": "message", "content": [{"type": "output_text", "text": '{"items":[]}'}]}],
+                "usage": {"input_tokens": 5, "output_tokens": 7}})
+        if protocol == "anthropic_messages":
+            assert request.url.path == "/v1/messages"
+            assert request.headers["x-api-key"] == "test-key-not-real"
+            return httpx.Response(200, json={"stop_reason": "end_turn", "content": [
+                {"type": "text", "text": '{"items":[]}'}],
+                "usage": {"input_tokens": 5, "output_tokens": 7}})
+        assert request.url.path == "/v1/chat/completions"
+        return response('{"items":[]}')
+
+    metadata = Metadata(settings)
+    client = ModelClient(settings, metadata, httpx.MockTransport(upstream))
+    session, _ = sample()
+    try:
+        credentials = client.resolve("station", "ignored-model", "ignored-key", protocol="responses")
+        assert credentials.protocol == protocol and credentials.model == "test-model"
+        assert await client.dimension("content", session, credentials) == []
+        assert len(calls) == 1
+        stats = await metadata.stats()
+        assert stats["station_prompt_tokens"] == (100 if protocol == "chat_completions" else 5)
+    finally:
+        await client.close()
+
+
+@pytest.mark.parametrize("protocol", ["chat_completions", "responses", "anthropic_messages"])
+async def test_reasoning_output_limit_is_reported_without_retrying_truncated_json(protocol):
+    settings = station().model_copy(update={"llm_output_tokens": 8192, "llm_protocol": protocol})
+    calls = []
+
+    def upstream(request):
+        payload = json.loads(request.content)
+        calls.append(payload)
+        if protocol == "responses":
+            assert payload["max_output_tokens"] == 8192
+            return httpx.Response(200, json={"status": "incomplete",
+                "incomplete_details": {"reason": "max_output_tokens"}, "output": []})
+        assert payload["max_tokens"] == 8192
+        if protocol == "anthropic_messages":
+            return httpx.Response(200, json={"stop_reason": "max_tokens", "content": []})
+        return httpx.Response(200, json={"choices": [{"finish_reason": "length",
+            "message": {"content": ""}}]})
+
+    client = ModelClient(settings, Metadata(settings), httpx.MockTransport(upstream))
+    session, _ = sample()
+    try:
+        with pytest.raises(Problem, match="MODEL_OUTPUT_LIMIT"):
+            await client.dimension("content", session, client.resolve("station", "", None))
+        assert len(calls) == 1
+    finally:
+        await client.close()
+
+
+async def test_network_timeout_has_a_distinct_error_and_is_not_retried():
+    calls = []
+
+    def upstream(request):
+        calls.append(request)
+        raise httpx.ReadTimeout("synthetic-private-timeout", request=request)
+
+    settings = station()
+    client = ModelClient(settings, Metadata(settings), httpx.MockTransport(upstream))
+    session, _ = sample()
+    try:
+        with pytest.raises(Problem, match="MODEL_TIMEOUT") as error:
+            await client.dimension("content", session, client.resolve("station", "", None))
+        assert len(calls) == 1 and 'synthetic-private-timeout' not in error.value.message
     finally:
         await client.close()

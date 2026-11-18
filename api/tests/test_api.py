@@ -44,6 +44,20 @@ async def client(tmp_path):
             yield client, app
 
 
+async def test_public_config_names_station_model_and_protocol_without_exposing_credentials(client):
+    c, app = client
+    result = (await c.get('/api/config')).json()
+    assert result['station_configured'] is True
+    assert result['station_model'] == 'test-model'
+    assert result['station_protocol'] == 'chat_completions'
+    assert 'test-key-not-real' not in json.dumps(result)
+    assert 'model.example.invalid' not in json.dumps(result)
+    app.state.model.settings.llm_base_url = ''
+    missing = (await c.get('/api/config')).json()
+    assert missing['station_configured'] is False
+    assert missing['station_model'] is None and missing['station_protocol'] is None
+
+
 async def upload(client):
     result = await client.post("/api/sessions", files={"file": ("fictional.docx", make_docx())},
                                data={"jd": JD, "consent": "true"})

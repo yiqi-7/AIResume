@@ -34,6 +34,9 @@ async def qa_addresses(host, port):
 
 
 def qa_model(request):
+    if request.method == 'POST' and json.loads(request.content).get('model') == 'restricted-model':
+        return httpx.Response(200, json={'choices': [{'message': {
+            'content': '本站仅限主流 Coding 客户端/CLI 使用。synthetic-private-marker'}}]})
     if request.method == "GET" and request.url.path == "/v1/models":
         return httpx.Response(200, json={"data": [{"id": "gpt-6-luna"}, {"id": "test-model"}]})
     if request.url.path == "/v1/responses":
@@ -42,6 +45,14 @@ def qa_model(request):
         content = mock_model(adapted).json()["choices"][0]["message"]["content"]
         return httpx.Response(200, json={"status": "completed", "output": [
             {"type": "message", "content": [{"type": "output_text", "text": content}]}]})
+    if request.url.path == "/v1/messages":
+        payload = json.loads(request.content)
+        assert request.headers["x-api-key"].startswith("synthetic-browser-key-")
+        adapted = httpx.Request("POST", request.url, json={"messages": [
+            {"role": "system", "content": payload["system"]}, *payload["messages"]]})
+        content = mock_model(adapted).json()["choices"][0]["message"]["content"]
+        return httpx.Response(200, json={"stop_reason": "end_turn", "content": [
+            {"type": "text", "text": content}]})
     return mock_model(request)
 
 
