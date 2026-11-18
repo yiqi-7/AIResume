@@ -149,13 +149,34 @@ def main():
                 assert not audit['failures'], (name, audit['failures'])
                 page.screenshot(path=str(OUT / f"{name}.png"), full_page=True)
 
+            def capture_large_text(name):
+                # Test text enlargement; production leaves the root size to the browser.
+                enlarged = page.add_style_tag(content='html { font-size: 200%; }')
+                try:
+                    assert page.locator('body').evaluate('e=>parseFloat(getComputedStyle(e).fontSize)') == 32
+                    if page.get_by_role('dialog').count():
+                        assert page.get_by_role('dialog').evaluate('e=>e.scrollWidth<=e.clientWidth+1'), name
+                    capture(name)
+                    if page.get_by_role('dialog').count():
+                        action = page.get_by_role('dialog').locator('.dialog-actions button').last
+                        action.scroll_into_view_if_needed()
+                        expect(action).to_be_in_viewport()
+                        capture(name + '-actions')
+                finally:
+                    enlarged.evaluate('e=>e.remove()')
+
             page.goto("http://127.0.0.1:4322/", wait_until="networkidle")
             capture("landing-desktop")
+            assert page.locator('meta[name="text-scale"]').get_attribute('content') == 'scale'
+            page.set_viewport_size({"width": 320, "height": 844})
+            capture('landing-narrow')
+            capture_large_text('landing-large-text')
             page.set_viewport_size({"width": 390, "height": 844})
             capture("landing-mobile")
             page.goto("http://127.0.0.1:4322/app/?demo=1", wait_until="networkidle")
             expect(page.get_by_role("heading", name="修改建议" )).to_be_visible()
             capture("review-mobile")
+            capture_large_text('review-large-text')
             page.set_viewport_size({"width": 1440, "height": 1050})
             capture("review-desktop")
             page.get_by_role("button", name="模型设置").click()
@@ -184,6 +205,9 @@ def main():
             expect(page.get_by_role('combobox', name='模型服务', exact=True)).to_contain_text('DeepSeek')
             assert page.get_by_role('combobox', name='模型服务', exact=True).locator('option').all_text_contents() == ['站方模型', 'DeepSeek · 自己的 Key']
             capture('model-settings-clean-desktop')
+            page.set_viewport_size({"width": 320, "height": 844})
+            capture_large_text('model-settings-large-text')
+            page.set_viewport_size({"width": 1440, "height": 1050})
             page.get_by_role('button', name='关闭模型设置', exact=True).click()
             capture("upload-desktop")
             sys.path.insert(0, str(ROOT / "api"))
@@ -278,14 +302,32 @@ def main():
                 page.get_by_label("API 地址", exact=True).fill("https://provider.example.invalid/v1")
                 page.get_by_label("API Key", exact=True).fill(f"synthetic-browser-key-{index}")
                 if index == 2:
-                    page.get_by_label("添加模型 ID", exact=True).fill("gpt-6-luna")
-                    page.get_by_role("button", name="添加模型", exact=True).click()
+                    model_input = page.get_by_label("添加模型 ID", exact=True)
+                    model_input.fill("gpt-6-luna")
+                    model_input.dispatch_event('keydown', {'key': 'Enter', 'code': 'Enter', 'isComposing': True})
+                    expect(model_input).to_have_value('gpt-6-luna')
+                    expect(page.locator('.model-chips>span')).to_have_count(0)
+                    model_input.evaluate("""e=>{
+                        e.dispatchEvent(new CompositionEvent('compositionend',{bubbles:true,data:'测试'}));
+                        e.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,cancelable:true,key:'Enter'}));
+                    }""")
+                    expect(model_input).to_have_value('gpt-6-luna')
+                    expect(page.locator('.model-chips>span')).to_have_count(0)
+                    page.wait_for_timeout(60)  # A separate Enter after IME confirmation.
+                    model_input.press('Enter')
+                    expect(page.locator('.model-chips>span')).to_have_count(1)
+                    expect(model_input).to_have_value('')
+                    page.get_by_role('button', name='显示 API Key', exact=True).click()
+                    expect(page.get_by_role('button', name='隐藏 API Key', exact=True)).to_have_attribute('aria-pressed', 'true')
+                    page.get_by_role('button', name='隐藏 API Key', exact=True).click()
+                    expect(page.get_by_role('button', name='显示 API Key', exact=True)).to_have_attribute('aria-pressed', 'false')
                 else:
                     page.get_by_role("button", name="获取可用模型", exact=True).click()
                     expect(page.get_by_text("已获取 2 个模型", exact=False)).to_be_visible()
                 if index == 3:
                     page.get_by_label("API 协议", exact=True).select_option("anthropic_messages")
                     page.set_viewport_size({"width": 390, "height": 844})
+                    capture_large_text('custom-api-large-text')
                 if index == 1:
                     expect(page.locator('.model-chips>span')).to_have_count(2)
                     page.get_by_role('button', name='设为默认模型 test-model', exact=True).click()
