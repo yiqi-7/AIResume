@@ -9,6 +9,7 @@ from .schemas import Problem, Resume
 
 MAX_PAGES = 8
 EXTRACTION_ERRORS = {
+    "PAGE_LIMIT": "简历超过 8 页，请精简后重试。",
     "ENCRYPTED_PDF": "PDF 已加密，请移除密码后重新上传。",
     "PDF_TEXT_REQUIRED": "PDF 含有无法读取文字的页面。仅支持可复制文字的 PDF，暂不支持扫描件或图片型 PDF。",
     "PDF_TEXT_UNREADABLE": "PDF 的文字编码无法完整读取，请从原始 Word 重新导出 PDF。",

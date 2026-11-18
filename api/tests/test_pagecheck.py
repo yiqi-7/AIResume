@@ -213,6 +213,20 @@ async def test_real_service_rejects_active_content_and_recovers():
         assert (await c.get("/healthz")).json()["temporary_jobs"] == 0
 
 
+async def test_real_pdf_page_limit_keeps_error_code_across_disposable_process():
+    from tests.test_pdf_documents import make_pdf
+
+    socket_path = os.environ.get("TEST_PAGECHECK_SOCKET")
+    if not socket_path:
+        pytest.skip("Requires the real systemd extraction sandbox")
+    checker = PageChecker(socket_path)
+    try:
+        with pytest.raises(Problem, match="PAGE_LIMIT"):
+            await checker.extract(make_pdf(9), "pdf")
+    finally:
+        await checker.close()
+
+
 async def test_real_service_deadline_busy_rejection_and_recovery():
     socket_path = os.environ.get("TEST_PAGECHECK_SOCKET")
     if not socket_path:
