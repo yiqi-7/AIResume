@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { ArrowLeft, ArrowRight, Check, ChevronLeft, ChevronRight, Download, FileText, LoaderCircle, Settings2, ShieldCheck, Upload, X } from 'lucide-react';
-import ModelDialog, { modelStorageKey } from './ModelDialog';
+import ModelDialog from './ModelDialog';
 import ResumePreview from './ResumePreview';
 import { ApiError, download, modelHeaders, request } from '../lib/api';
 import { applyDemo, demoSession } from '../lib/demo';
+import { customAPIStorageKey, loadModelSettings, modelRequest, modelStorageKey } from '../lib/model-settings';
 import type { Configuration, Dimension, ModelSettings, Resume, Session } from '../lib/types';
 
 const dimensionNames:Record<Dimension,string>={structure:'结构与阅读',content:'经历表达',relevance:'岗位相关'};
@@ -47,7 +48,7 @@ export default function Workspace(){
     let cancelled=false;
     const isDemo=new URLSearchParams(location.search).get('demo')==='1';
     setDemo(isDemo);
-    try{const saved=JSON.parse(localStorage.getItem(modelStorageKey)??'null');if(saved&&typeof saved.provider==='string'&&typeof saved.model==='string'&&typeof saved.key==='string')setModel(saved);}catch{/* Unavailable storage does not block an ephemeral session. */}
+    setModel(loadModelSettings());
     if(isDemo){setSession(demoSession());setLoading(false);return;}
     Promise.allSettled([request<Configuration>('/api/config'),request<{session:Session|null}>('/api/session')]).then(results=>{
       if(cancelled)return;
@@ -57,6 +58,11 @@ export default function Workspace(){
       setLoading(false);
     });
     return()=>{cancelled=true;};
+  },[]);
+
+  useEffect(()=>{
+    const sync=(event:StorageEvent)=>{if(event.key===modelStorageKey||event.key===customAPIStorageKey||event.key===null)setModel(loadModelSettings());};
+    window.addEventListener('storage',sync);return()=>window.removeEventListener('storage',sync);
   },[]);
 
   useEffect(()=>{
@@ -108,7 +114,7 @@ export default function Workspace(){
     const form=new FormData();form.append('file',file);form.append('jd',jd);form.append('consent',String(consent));
     const created=await request<Session>('/api/sessions',{method:'POST',body:form});setSession(created);setFile(null);setJD('');setConsent(false);setTab('review');
   });}
-  async function analyze(){if(!session)return;await action(async()=>{setSession(await request<Session>(`/api/sessions/${session.id}/analyze`,{method:'POST',headers:modelHeaders(model.key),body:JSON.stringify({provider:model.provider,model:model.model})}));});}
+  async function analyze(){if(!session)return;await action(async()=>{setSession(await request<Session>(`/api/sessions/${session.id}/analyze`,{method:'POST',headers:modelHeaders(model.key),body:JSON.stringify(modelRequest(model))}));});}
   async function decide(decision:'accept'|'skip'|'restore'){
     if(!session||!item)return;
     await action(async()=>{
@@ -119,7 +125,7 @@ export default function Workspace(){
   }
   async function answer(){if(!session||!item)return;await action(async()=>{
     if(demo){setNotice('示例不调用模型。请使用自己的简历与模型设置，体验补充事实后的改写。');return;}
-    setSession(await request<Session>(`/api/sessions/${session.id}/suggestions/${item.id}/answer`,{method:'POST',headers:modelHeaders(model.key),body:JSON.stringify({answer:fact,section_id:sectionId,confirmed:factsConfirmed,provider:model.provider,model:model.model})}));
+    setSession(await request<Session>(`/api/sessions/${session.id}/suggestions/${item.id}/answer`,{method:'POST',headers:modelHeaders(model.key),body:JSON.stringify({answer:fact,section_id:sectionId,confirmed:factsConfirmed,...modelRequest(model)})}));
   });}
   async function finish(){if(!session)return;const choice=confirm;setConfirm(null);await action(async()=>{
     if(choice==='export'){

@@ -38,6 +38,7 @@ def create_app(settings: Settings | None = None, model_transport=None, pagecheck
     model = ModelClient(settings, metadata, transport=model_transport)
     pagecheck = PageChecker(settings.pagecheck_socket, transport=pagecheck_transport)
     upload_slots = asyncio.BoundedSemaphore(settings.max_active_uploads)
+    catalog_slots = asyncio.BoundedSemaphore(2)
 
     async def sweeper():
         while True:
@@ -197,6 +198,18 @@ def create_app(settings: Settings | None = None, model_transport=None, pagecheck
             response.delete_cookie(settings.cookie_name, path="/api")
             return {"session": None}
 
+    @app.post("/api/models")
+    async def model_catalog(data: AnalyzeRequest, x_llm_key: str | None = Header(default=None)):
+        if data.provider == "station":
+            raise Problem("MODEL_KEY_REQUIRED", "请填写自己的 API Key 后获取模型目录。", 422)
+        credentials = model.resolve(data.provider, data.model or "catalog", x_llm_key,
+                                    data.base_url, data.protocol)
+        if catalog_slots.locked():
+            raise Problem("BUSY", "正在获取其他模型目录，请稍后再试。", 429)
+        async with catalog_slots:
+            async with asyncio.timeout(20):
+                return {"models": await model.models(credentials)}
+
     @app.post("/api/sessions", status_code=201)
     async def create_session(request: Request, response: Response):
         async with upload_form(request, settings.upload_bytes, settings.jd_bytes + 1024,
@@ -318,7 +331,8 @@ def create_app(settings: Settings | None = None, model_transport=None, pagecheck
     async def analyze(sid: str, data: AnalyzeRequest, request: Request,
                       x_llm_key: str | None = Header(default=None)):
         await store.authorize(sid, request.cookies.get(settings.cookie_name))
-        credentials = model.resolve(data.provider, data.model, x_llm_key)
+        credentials = model.resolve(data.provider, data.model, x_llm_key,
+                                    data.base_url, data.protocol)
         async with store.job_guard:
             async with store.lock(sid):
                 session = await store.read(sid)
@@ -425,7 +439,8 @@ def create_app(settings: Settings | None = None, model_transport=None, pagecheck
         await store.authorize(sid, request.cookies.get(settings.cookie_name))
         if not data.confirmed:
             raise Problem("CONFIRM_FACTS", "请确认补充的信息真实。", 422)
-        credentials = model.resolve(data.provider, data.model, x_llm_key)
+        credentials = model.resolve(data.provider, data.model, x_llm_key,
+                                    data.base_url, data.protocol)
         async with store.job_guard:
             async with store.lock(sid):
                 session = await store.read(sid)
