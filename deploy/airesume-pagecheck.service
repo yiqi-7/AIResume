@@ -33,8 +33,10 @@ ProtectControlGroups=true
 RestrictNamespaces=true
 RestrictSUIDSGID=true
 LockPersonality=true
-InaccessiblePaths=/run -/etc/airesume -/var/lib/airesume /var/tmp
-TemporaryFileSystem=/tmp:rw,nosuid,nodev,noexec,size=96M,mode=1777
+InaccessiblePaths=-/etc/airesume -/var/lib/airesume /var/tmp
+# Keep host runtime sockets hidden without bind-mounting systemd's own /run tree.
+# The listening socket is inherited as fd 3 before the private mounts are applied.
+TemporaryFileSystem=/tmp:rw,nosuid,nodev,noexec,size=96M,mode=1777 /run:ro,nosuid,nodev,noexec,size=4K,mode=000
 MemoryMax=384M
 MemorySwapMax=0
 CPUQuota=100%
