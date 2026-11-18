@@ -175,9 +175,12 @@ def create_app(settings: Settings | None = None, model_transport=None, pagecheck
 
     @app.get("/api/config")
     async def configuration():
+        configured = bool(settings.llm_base_url and settings.llm_model
+                          and settings.llm_api_key.get_secret_value())
         return {
-            "station_configured": bool(settings.llm_base_url and settings.llm_model
-                                       and settings.llm_api_key.get_secret_value()),
+            "station_configured": configured,
+            "station_model": settings.llm_model if configured else None,
+            "station_protocol": settings.llm_protocol if configured else None,
             "providers": [{"id": k, "name": v["name"]} for k, v in PROVIDERS.items()],
             "upload_bytes": settings.upload_bytes,
             "idle_seconds": settings.idle_seconds,
@@ -202,7 +205,7 @@ def create_app(settings: Settings | None = None, model_transport=None, pagecheck
     async def model_catalog(data: AnalyzeRequest, x_llm_key: str | None = Header(default=None)):
         if data.provider == "station":
             raise Problem("MODEL_KEY_REQUIRED", "请填写自己的 API Key 后获取模型目录。", 422)
-        credentials = model.resolve(data.provider, data.model or "catalog", x_llm_key,
+        credentials = model.resolve(data.provider, "catalog", x_llm_key,
                                     data.base_url, data.protocol)
         if catalog_slots.locked():
             raise Problem("BUSY", "正在获取其他模型目录，请稍后再试。", 429)

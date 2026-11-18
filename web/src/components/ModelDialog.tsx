@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { Check, Pencil, Plus, Trash2, X } from 'lucide-react';
 import CustomAPIEditor from './CustomAPIEditor';
-import { customAPIStorageKey, fromCustomAPI, loadCustomAPIs, maxCustomAPIs, modelIDPattern, modelStorageKey, persistCustomAPIs, stationSettings } from '../lib/model-settings';
+import { customAPIStorageKey, fromCustomAPI, loadCustomAPIs, maxCustomAPIs, modelIDPattern, modelStorageKey, persistCustomAPIs, protocolNames, stationSettings } from '../lib/model-settings';
 import type { Configuration, CustomAPI, ModelSettings } from '../lib/types';
 
 type Props = {open:boolean; onOpenChange:(v:boolean)=>void; settings:ModelSettings; config:Configuration|null; onSave:(s:ModelSettings)=>void};
@@ -12,6 +12,7 @@ export default function ModelDialog({open,onOpenChange,settings,config,onSave}:P
   const [tab,setTab]=useState<'builtin'|'custom'>('builtin');
   const [draft,setDraft]=useState(settings);
   const [profiles,setProfiles]=useState<CustomAPI[]>([]);
+  const [modelChoices,setModelChoices]=useState<Record<string,string>>({});
   const [editing,setEditing]=useState<CustomAPI|null>(null);
   const [editingId,setEditingId]=useState<string|null>(null);
   const [remember,setRemember]=useState(false);
@@ -20,7 +21,9 @@ export default function ModelDialog({open,onOpenChange,settings,config,onSave}:P
   const feedback=useRef<HTMLParagraphElement>(null);
   useEffect(()=>{
     if(open){
-      setDraft(settings.provider==='custom'?stationSettings:settings);setProfiles(loadCustomAPIs());
+      const saved=loadCustomAPIs();
+      setDraft(settings.provider==='custom'?stationSettings:settings);setProfiles(saved);
+      setModelChoices(Object.fromEntries(saved.map(p=>[p.id,settings.provider==='custom'&&settings.id===p.id?settings.model:p.model])));
       setTab(settings.provider==='custom'?'custom':'builtin');setEditing(null);setEditingId(null);
       setError('');setNotice('');
       try{setRemember(!!localStorage.getItem(modelStorageKey));}catch{setRemember(false);}
@@ -32,12 +35,13 @@ export default function ModelDialog({open,onOpenChange,settings,config,onSave}:P
     window.addEventListener('storage',sync);return()=>window.removeEventListener('storage',sync);
   },[]);
   function fail(message:string){setNotice('');setError(message);}
-  function selectCustom(profile:CustomAPI){
+  function selectCustom(profile:CustomAPI,selectedModel=profile.model){
     const latest=loadCustomAPIs().find(p=>p.id===profile.id);
     if(!latest){setProfiles(loadCustomAPIs());fail('这组配置已被删除，请重新选择。');return;}
-    try{localStorage.setItem(modelStorageKey,JSON.stringify({provider:'custom',id:latest.id}));}
+    if(!modelIDPattern.test(selectedModel)){fail('请选择或填写有效的模型 ID。');return;}
+    try{localStorage.setItem(modelStorageKey,JSON.stringify({provider:'custom',id:latest.id,model:selectedModel}));}
     catch{fail('浏览器不允许保存配置，请检查本地存储设置。');return;}
-    onSave(fromCustomAPI(latest));onOpenChange(false);
+    onSave(fromCustomAPI(latest,selectedModel));onOpenChange(false);
   }
   function saveBuiltin(e:React.SyntheticEvent<HTMLFormElement>){
     e.preventDefault();
@@ -96,15 +100,19 @@ export default function ModelDialog({open,onOpenChange,settings,config,onSave}:P
         <label htmlFor="model-key">API Key</label><input id="model-key" type="password" value={draft.key} onChange={e=>setDraft({...draft,key:e.target.value})} autoComplete="off" maxLength={512} required/>
         <label className="check-label"><input type="checkbox" checked={remember} onChange={e=>setRemember(e.target.checked)}/><span>在当前浏览器长期保存 Key</span></label>
         <p className="field-hint">Key 仅用于所选服务，不写入后端存储。调用费用由对应服务商收取。</p>
-      </>:<p className="inline-note">{config?.station_configured?'使用站方配置的模型，受匿名体验额度限制。':'站方尚未配置模型，可以使用自己的 API 或查看虚构示例。'}</p>}
+      </>:<div className="station-model-info"><h3>站方使用的模型</h3><strong>{config?.station_configured?config.station_model??'模型信息暂不可用，请刷新后重试':'尚未配置'}</strong>{config?.station_protocol&&<small>{protocolNames[config.station_protocol]}</small>}<p className="field-hint">{config?.station_configured?'分析会使用以上模型，受匿名体验额度限制。':'可以添加自己的 API 或先查看虚构示例。'}</p></div>}
       <div className="dialog-actions"><button type="button" className="text-button" onClick={clear}>清空全部 Key</button><button className="button primary" type="submit">保存设置</button></div>
     </form></div>:<div role="tabpanel" id="custom-panel" aria-labelledby="custom-tab">
       <p className="field-hint model-storage-note">当前浏览器最多长期保存 3 组自定义 API。公用设备请勿保存；可随时修改或删除。</p>
       {editing?<CustomAPIEditor initial={editing} editing={!!editingId} onSave={saveCustom} onCancel={()=>{setEditing(null);setError('');setNotice('');}}/>:<>
         <div className="custom-api-list">{profiles.length?profiles.map(profile=><article className="custom-api-card" key={profile.id}>
           <div className="custom-api-heading"><h3>{profile.name}</h3>{settings.provider==='custom'&&settings.id===profile.id&&<span className="api-selected"><Check size={13}/>正在使用</span>}</div>
-          <p>{profile.base_url}</p><small>{profile.protocol==='responses'?'OpenAI Responses':'OpenAI Chat Completions'} · {profile.model}</small>
-          <div className="custom-api-actions"><button className="button quiet" onClick={()=>begin(profile)}><Pencil size={14}/>编辑</button><button className="button quiet" aria-label={`删除 ${profile.name}`} onClick={()=>removeProfile(profile.id)}><Trash2 size={14}/>删除</button><button className="button primary" onClick={()=>selectCustom(profile)}>使用</button></div>
+          <p>{profile.base_url}</p><small>{protocolNames[profile.protocol]} · {profile.models.length} 个模型</small>
+          <label className="profile-model-label" htmlFor={`profile-model-${profile.id}`}>本次使用的模型 · {profile.name}</label>
+          <input id={`profile-model-${profile.id}`} list={`profile-models-${profile.id}`} value={modelChoices[profile.id]??profile.model} onChange={e=>setModelChoices({...modelChoices,[profile.id]:e.target.value})} maxLength={100} autoComplete="off"/>
+          <datalist id={`profile-models-${profile.id}`}>{[...new Set([profile.model,...profile.models])].map(model=><option key={model} value={model}/>)}</datalist>
+          <p className="field-hint">选择目录中的模型，也可直接填写目录外的模型 ID。</p>
+          <div className="custom-api-actions"><button className="button quiet" onClick={()=>begin(profile)}><Pencil size={14}/>编辑</button><button className="button quiet" aria-label={`删除 ${profile.name}`} onClick={()=>removeProfile(profile.id)}><Trash2 size={14}/>删除</button><button className="button primary" onClick={()=>selectCustom(profile,modelChoices[profile.id]??profile.model)}>使用</button></div>
         </article>):<div className="custom-api-empty"><h3>连接你自己的模型服务</h3><p>填写服务地址和 Key，选择模型后即可用于简历分析。</p></div>}</div>
         <button className="button quiet add-api" onClick={()=>begin()} disabled={profiles.length>=maxCustomAPIs}><Plus size={16}/>添加自定义 API</button>
         {profiles.length>=maxCustomAPIs&&<p className="field-hint">已达到 3 组上限，删除一组后可以继续添加。</p>}

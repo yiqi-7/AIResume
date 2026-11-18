@@ -1,10 +1,13 @@
-import type { CustomAPI, ModelSettings } from './types';
+import type { APIProtocol, CustomAPI, ModelSettings } from './types';
 
 export const modelStorageKey = 'airesume-model-v1';
 export const customAPIStorageKey = 'airesume-custom-apis-v1';
 export const maxCustomAPIs = 3;
 export const stationSettings:ModelSettings = {provider:'station', model:'', key:''};
 export const modelIDPattern = /^[\w./:+-]{1,100}$/u;
+export const protocolNames:Record<APIProtocol,string> = {
+  chat_completions:'OpenAI Chat Completions', responses:'OpenAI Responses', anthropic_messages:'Anthropic Messages',
+};
 
 function isCustomAPI(value:unknown):value is CustomAPI {
   if (!value || typeof value !== 'object') return false;
@@ -12,7 +15,7 @@ function isCustomAPI(value:unknown):value is CustomAPI {
   return typeof p.id==='string' && /^[a-z][a-z0-9_-]{0,39}$/.test(p.id)
     && typeof p.name==='string' && p.name.length>0 && p.name.length<=60
     && typeof p.base_url==='string' && p.base_url.length<=2048
-    && (p.protocol==='chat_completions'||p.protocol==='responses')
+    && (p.protocol==='chat_completions'||p.protocol==='responses'||p.protocol==='anthropic_messages')
     && typeof p.key==='string' && p.key.length>0 && p.key.length<=512
     && typeof p.model==='string' && modelIDPattern.test(p.model)
     && Array.isArray(p.models) && p.models.length<=100
@@ -28,9 +31,9 @@ export function loadCustomAPIs():CustomAPI[] {
   } catch { return []; }
 }
 
-export function fromCustomAPI(profile:CustomAPI):ModelSettings {
+export function fromCustomAPI(profile:CustomAPI,model=profile.model):ModelSettings {
   return {provider:'custom',id:profile.id,name:profile.name,base_url:profile.base_url,
-    protocol:profile.protocol,model:profile.model,key:profile.key};
+    protocol:profile.protocol,model,key:profile.key};
 }
 
 export function loadModelSettings():ModelSettings {
@@ -38,7 +41,8 @@ export function loadModelSettings():ModelSettings {
     const saved=JSON.parse(localStorage.getItem(modelStorageKey)??'null');
     if (saved?.provider==='custom') {
       const profile=loadCustomAPIs().find(p=>p.id===saved.id);
-      return profile?fromCustomAPI(profile):stationSettings;
+      const model=typeof saved.model==='string'&&modelIDPattern.test(saved.model)?saved.model:profile?.model;
+      return profile?fromCustomAPI(profile,model):stationSettings;
     }
     if (saved && ['deepseek','qwen','zhipu'].includes(saved.provider)
       && typeof saved.model==='string' && typeof saved.key==='string') return saved;
