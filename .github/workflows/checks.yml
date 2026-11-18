@@ -90,8 +90,29 @@ jobs:
         if: always()
         run: |
           sudo systemctl show airesume-pagecheck.service -p ActiveState -p MemoryPeak -p MemoryMax -p MemorySwapMax -p TasksMax -p NRestarts
-          sudo journalctl -u airesume-pagecheck.service --no-pager -n 30
+          sudo journalctl -u airesume-pagecheck.service --no-pager -n 500
           sudo journalctl -b --no-pager --grep='airesume-pagecheck|mount namespacing' -n 120
+          sudo journalctl -b -p warning --no-pager --since '-5 minutes'
+      - name: Diagnose mount namespace failure without changing production limits
+        if: failure()
+        run: |
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+          keys = {'User', 'Group', 'PrivateNetwork', 'PrivateDevices', 'ProtectSystem',
+                  'ProtectHome', 'ProtectKernelTunables', 'ProtectKernelModules',
+                  'ProtectControlGroups', 'InaccessiblePaths', 'TemporaryFileSystem'}
+          properties = [line for line in Path('deploy/airesume-pagecheck.service').read_text().splitlines()
+                        if line.split('=', 1)[0] in keys]
+          for omitted in [None, *properties]:
+              command = ['sudo', 'systemd-run', '--wait', '--pipe', '--collect', '--quiet']
+              for prop in properties:
+                  if prop != omitted:
+                      command.extend(['--property', prop])
+              result = subprocess.run([*command, '/usr/bin/true'], capture_output=True, text=True, timeout=15)
+              print(f'omitted={omitted!r} exit={result.returncode}', flush=True)
+              print(result.stderr[-2000:], flush=True)
+          PY
       - name: Install frontend dependencies
         working-directory: web
         run: npm ci
