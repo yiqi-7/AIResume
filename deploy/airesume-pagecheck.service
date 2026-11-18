@@ -1,0 +1,44 @@
+[Unit]
+Description=AIResume isolated DOCX pagination
+Requires=airesume-pagecheck.socket
+After=airesume-pagecheck.socket
+
+[Service]
+Type=simple
+User=airesume-render
+Group=airesume-render
+WorkingDirectory=/opt/airesume/api
+ExecStart=/opt/airesume/api/.venv/bin/python -m uvicorn app.pagecheck_worker:app --fd 3 --no-access-log --no-proxy-headers
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=TMPDIR=/tmp
+Environment=HOME=/tmp
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=5
+KillMode=control-group
+OOMPolicy=kill
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+InaccessiblePaths=/run -/etc/airesume -/var/lib/airesume /var/tmp
+TemporaryFileSystem=/tmp:rw,nosuid,nodev,noexec,size=96M,mode=1777
+MemoryMax=384M
+MemorySwapMax=0
+CPUQuota=100%
+TasksMax=64
+LimitCORE=0
+LimitFSIZE=33554432
+LimitNOFILE=512

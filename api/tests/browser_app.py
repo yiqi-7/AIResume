@@ -11,4 +11,6 @@ settings = station().model_copy(update={
     "data_dir": Path(__file__).resolve().parents[2] / ".local" / "qa-sessions",
     "allowed_origins": ["http://127.0.0.1:4322"],
 })
-app = create_app(settings, httpx.MockTransport(mock_model))
+# Browser QA exercises editing with synthetic material. The Linux service has separate integration tests.
+app = create_app(settings, httpx.MockTransport(mock_model),
+                 httpx.MockTransport(lambda request: httpx.Response(200, json={"pages": 1})))

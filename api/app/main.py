@@ -17,6 +17,7 @@ from .config import Settings
 from .documents import export_docx, final_resume, parse_docx
 from .llm import PROVIDERS, ModelClient
 from .metadata import Metadata
+from .pagecheck import PageChecker
 from .schemas import AnalyzeRequest, FactAnswer, Problem, Session, Suggestion, SuggestionEdit
 from .storage import Store
 from .uploads import MAX_BODY_BYTES, upload_form
@@ -30,11 +31,12 @@ def public_session(session: Session):
     })
 
 
-def create_app(settings: Settings | None = None, model_transport=None):
+def create_app(settings: Settings | None = None, model_transport=None, pagecheck_transport=None):
     settings = settings or Settings()
     metadata = Metadata(settings)
     store = Store(settings, metadata)
     model = ModelClient(settings, metadata, transport=model_transport)
+    pagecheck = PageChecker(settings.pagecheck_socket, transport=pagecheck_transport)
     upload_slots = asyncio.BoundedSemaphore(settings.max_active_uploads)
 
     async def sweeper():
@@ -55,6 +57,7 @@ def create_app(settings: Settings | None = None, model_transport=None):
         await asyncio.gather(cleanup, return_exceptions=True)
         await store.close()
         await model.close()
+        await pagecheck.close()
         await metadata.close()
 
     app = FastAPI(title="AIResume", version="0.1.0", lifespan=lifespan,
@@ -63,6 +66,7 @@ def create_app(settings: Settings | None = None, model_transport=None):
                   if settings.environment == "development" else None)
     app.state.store, app.state.model, app.state.settings = store, model, settings
     app.state.metadata = metadata
+    app.state.pagecheck = pagecheck
     app.add_middleware(
         CORSMiddleware, allow_origins=settings.allowed_origins, allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
@@ -223,6 +227,9 @@ def create_app(settings: Settings | None = None, model_transport=None):
                     "CONTEXT_TOO_LONG",
                     "材料超出当前模型处理范围，请精简 JD 或简历；系统不会静默截断。", 422
                 )
+            resume.rendered_pages = await pagecheck.count(bytes(raw))
+            resume.page_count_verified = True
+            resume.warnings.append("页数按服务器排版结果校验，可能与本机 Word 的字体和分页不同。")
             ip = request.client.host if request.client else "unknown"
             ip_key = hmac.new(
                 settings.ip_salt.get_secret_value().encode(), ip.encode(), hashlib.sha256

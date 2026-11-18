@@ -51,7 +51,7 @@ def test_parse_round_trip_and_source_is_untouched():
     assert parse_docx(raw).sections[1].kind == "projects"
 
 
-def test_reject_invalid_zip_and_textboxes_and_oversized_page_metadata():
+def test_reject_invalid_zip_and_textboxes_but_do_not_trust_page_metadata():
     with pytest.raises(Problem, match="INVALID_DOCX"):
         parse_docx(b"not a docx")
     raw = make_docx()
@@ -61,9 +61,9 @@ def test_reject_invalid_zip_and_textboxes_and_oversized_page_metadata():
     with pytest.raises(Problem, match="TEXTBOX_UNSUPPORTED"):
         parse_docx(replace_part(raw, "word/document.xml", xml.replace(
             b"<w:body>", b"<w:body><w:p><w:txbxContent/></w:p>")))
-    with pytest.raises(Problem, match="PAGE_LIMIT_ESTIMATED"):
-        parse_docx(replace_part(raw, "docProps/app.xml", app.replace(b"<Pages>1</Pages>",
-                                                                  b"<Pages>9</Pages>")))
+    resume = parse_docx(replace_part(raw, "docProps/app.xml", app.replace(b"<Pages>1</Pages>",
+                                                                      b"<Pages>99</Pages>")))
+    assert resume.estimated_pages == 99 and not resume.page_count_verified
 
 
 def test_table_rows_are_preserved_in_source_order():

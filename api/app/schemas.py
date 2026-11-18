@@ -24,6 +24,7 @@ class Resume(BaseModel):
     sections: list[Section]
     warnings: list[str] = []
     estimated_pages: int | None = None
+    rendered_pages: int | None = None
     page_count_verified: bool = False
 
 

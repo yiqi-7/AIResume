@@ -59,6 +59,19 @@ def parse_docx(raw: bytes) -> Resume:
             names = set(archive.namelist())
             if "word/document.xml" not in names:
                 raise Problem("INVALID_DOCX", "文件不是有效的 Word DOCX 文档。", 422)
+            # The text and safety checks below must inspect the actual main part,
+            # not a harmless decoy while python-docx opens a relocated document.
+            package_rels = SafeET.fromstring(archive.read("_rels/.rels"))
+            main_parts = [rel for rel in package_rels
+                          if rel.attrib.get("Type", "").endswith("/officeDocument")]
+            if (len(main_parts) != 1
+                    or main_parts[0].attrib.get("Target") not in {
+                        "word/document.xml", "/word/document.xml"}
+                    or main_parts[0].attrib.get("TargetMode", "").casefold() == "external"):
+                raise Problem(
+                    "STRUCTURE_UNSUPPORTED",
+                    "文档使用了非标准正文结构，请在 Word 中另存为普通 DOCX 后重试。", 422,
+                )
             document_xml = archive.read("word/document.xml")
             root = SafeET.fromstring(document_xml)
             # Never resolve external relationships, including linked images.
@@ -89,16 +102,6 @@ def parse_docx(raw: bytes) -> Resume:
                 for element in app.iter():
                     if element.tag.endswith("}Pages") and (element.text or "").isdigit():
                         page_estimate = int(element.text)
-            if page_estimate and page_estimate > 8:
-                raise Problem(
-                    "PAGE_LIMIT_ESTIMATED",
-                    "文件记录的页数超过 8 页。请精简，或在 Word 中重新保存以更新页数后再试。",
-                    422,
-                )
-            if page_estimate is None:
-                warnings.append("文件未提供页数信息。请自行确认原简历不超过 8 页。")
-            else:
-                warnings.append("页数来自文档元数据，仅供参考，并非重新排版后的准确页数。")
         # Load with python-docx only after bounding the decompressed package.
         doc = Document(io.BytesIO(raw))
         sections = [Section(id="sec_contact", kind="contact", title="基本信息", blocks=[])]
@@ -168,6 +171,9 @@ def parse_docx(raw: bytes) -> Resume:
 
 def final_resume(session: Session) -> Resume:
     resume = session.resume.model_copy(deep=True)
+    # The upload's pagination does not certify the edited, newly templated output.
+    resume.estimated_pages = resume.rendered_pages = None
+    resume.page_count_verified = False
     blocks = {b.id: b for s in resume.sections for b in s.blocks}
     sections = {s.id: s for s in resume.sections}
     for item in session.suggestions:

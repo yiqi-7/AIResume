@@ -39,9 +39,39 @@ jobs:
           python-version: '3.12'
       - name: Install Python dependencies
         working-directory: api
-        run: uv sync --locked --group dev --group qa
-      - name: Install nginx for isolated configuration and proxy verification
-        run: sudo apt-get update -qq && sudo apt-get install -y nginx-core
+        run: uv sync --locked --group dev --group qa --python /usr/bin/python3.12
+      - name: Install isolated proxy and pagination dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y nginx-core libreoffice-writer fonts-noto-cjk
+      - name: Start real pagination sandbox using the production unit templates
+        run: |
+          sudo useradd --system --no-create-home --shell /usr/sbin/nologin airesume-render
+          sudo install -d /opt/airesume/api /opt/airesume/shared
+          sudo cp -a api/app api/.venv /opt/airesume/api/
+          sudo cp shared/template.json /opt/airesume/shared/
+          sudo chmod -R a+rX /opt/airesume
+          python - <<'PY'
+          import os
+          import subprocess
+          from pathlib import Path
+          root = Path(os.environ['GITHUB_WORKSPACE'])
+          for suffix in ('socket', 'service'):
+              text = (root / 'deploy' / f'airesume-pagecheck.{suffix}').read_text()
+              # Use exactly the service sandbox; only the API client's group differs in CI.
+              text = text.replace('SocketGroup=airesume\n', 'SocketGroup=runner\n')
+              subprocess.run(['sudo', 'tee', f'/etc/systemd/system/airesume-pagecheck.{suffix}'],
+                             input=text.encode(), stdout=subprocess.DEVNULL, check=True)
+          PY
+          sudo systemctl daemon-reload
+          sudo systemctl start airesume-pagecheck.socket
+          # Socket activation starts the service; its lifespan validates actual kernel limits.
+          api/.venv/bin/python - <<'PY'
+          import httpx
+          with httpx.Client(transport=httpx.HTTPTransport(uds='/run/airesume-pagecheck.sock'),
+                            base_url='http://pagecheck', timeout=30) as client:
+              result = client.get('/healthz')
+              result.raise_for_status()
+              assert result.json()['isolated']
+          PY
       - name: Lint Python
         working-directory: api
         run: uv run ruff check app tests ../scripts/browser_qa.py ../deploy/generate_cloudflare_nginx.py
@@ -50,7 +80,13 @@ jobs:
         env:
           TEST_REDIS_URL: redis://127.0.0.1:6379/15
           TEST_NGINX_PATH: /usr/sbin/nginx
+          TEST_PAGECHECK_SOCKET: /run/airesume-pagecheck.sock
         run: uv run pytest -q
+      - name: Inspect pagination resource usage and service diagnostics
+        if: always()
+        run: |
+          sudo systemctl show airesume-pagecheck.service -p ActiveState -p MemoryPeak -p MemoryMax -p MemorySwapMax -p TasksMax -p NRestarts
+          sudo journalctl -u airesume-pagecheck.service --no-pager -n 30
       - name: Install frontend dependencies
         working-directory: web
         run: npm ci

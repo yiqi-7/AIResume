@@ -1,6 +1,7 @@
 [Unit]
 Description=AIResume API
-After=network.target
+After=network.target airesume-pagecheck.socket
+Requires=airesume-pagecheck.socket
 
 [Service]
 Type=simple

@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     max_analysis_chars: int = 30000
     max_active_uploads: int = Field(1, ge=1, le=4)
     upload_timeout: float = Field(60, ge=0.01, le=300)
+    pagecheck_socket: str = "/run/airesume-pagecheck.sock"
     max_active_jobs: int = Field(2, ge=1, le=8)
     free_daily: int = 3
     global_daily: int = 200

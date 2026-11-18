@@ -1,7 +1,7 @@
 export type Dimension = 'structure' | 'content' | 'relevance';
 export type Block = { id: string; text: string; kind: 'paragraph' | 'bullet' | 'heading' };
 export type Section = { id: string; kind: 'contact' | 'education' | 'experience' | 'projects' | 'skills' | 'other'; title: string; blocks: Block[] };
-export type Resume = { sections: Section[]; warnings: string[]; estimated_pages: number | null; page_count_verified: boolean };
+export type Resume = { sections: Section[]; warnings: string[]; estimated_pages: number | null; rendered_pages?: number | null; page_count_verified: boolean };
 export type Suggestion = {
  id: string; dimension: Dimension; title: string; priority: 'P0'|'P1'|'P2'|'P3';
  target_block_id: string|null; resume_quote: string; jd_quote: string; reason: string;

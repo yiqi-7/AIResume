@@ -36,7 +36,8 @@ def mock_model(req):
 @pytest.fixture
 async def client(tmp_path):
     settings = station().model_copy(update={"data_dir": tmp_path / "private"})
-    app = create_app(settings, httpx.MockTransport(mock_model))
+    app = create_app(settings, httpx.MockTransport(mock_model),
+                     httpx.MockTransport(lambda request: httpx.Response(200, json={"pages": 1})))
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                                      base_url="http://test", headers=HEADERS) as client:
@@ -65,6 +66,8 @@ async def test_end_to_end_parse_confirm_analyze_decide_fact_preview_export_and_p
     session = await upload(c)
     sid = session["id"]
     assert session["state"] == "parsed" and not session["suggestions"]
+    assert session["resume"]["page_count_verified"] is True
+    assert session["resume"]["rendered_pages"] == 1
     assert "auth_hash" not in session and "ip_key" not in session
     assert (await c.get("/api/session")).json()["session"]["id"] == sid
     assert (await c.post(f"/api/sessions/{sid}/analyze", json={})).status_code == 202
@@ -92,6 +95,7 @@ async def test_end_to_end_parse_confirm_analyze_decide_fact_preview_export_and_p
                                           "confirmed_facts": True})
     assert result.status_code == 200
     preview = (await c.get(f"/api/sessions/{sid}/preview")).json()
+    assert preview["page_count_verified"] is False and preview["rendered_pages"] is None
     assert preview["sections"][-1]["blocks"][-1]["text"] == "和同学核对需求文档。"
     exported = await c.post(f"/api/sessions/{sid}/export")
     assert exported.status_code == 200

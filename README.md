@@ -20,6 +20,10 @@ uv sync --group dev
 
 打开 `http://127.0.0.1:4321`。模型配置参考 `api/.env.example`，或在页面内设置自己的 Key；未配置时可查看虚构示例。
 
+真实上传还需要 Linux 隔离排版服务：安装 LibreOffice Writer、Noto CJK 字体，创建独立 `airesume-render` 用户/组，使用 `deploy/airesume-pagecheck.socket` 与 `.service`（默认代码路径 `/opt/airesume`，SocketGroup 为 API 的 `airesume` 组）。渲染用户不要加入 API 组；API 配置与会话须禁止其他用户读取。安装两个 unit 后启用 socket。服务限制单并发、384 MB 内存、无 swap、96 MB 临时内存盘和 30 秒任务时限；生产发布前需验证目标机器资源余量。
+
+页数以服务器 LibreOffice 的完整 PDF 排版为准，上限 8 页，可能与本机 Word 不同。隔离服务缺失或校验失败时不保存上传。Windows 本地可查看虚构示例；浏览器 QA 使用模拟页数服务，真实隔离服务由 Ubuntu 集成测试验证。
+
 ```powershell
 cd api
 uv run ruff check app tests
