@@ -2,15 +2,15 @@
 
 **简体中文** | [English](README.en.md)
 
-> 把做过的事，写得更清楚。
-
-AIResume（叙职）是一款面向应届生与校招生的在线简历优化工具。上传已有简历、提供目标岗位描述后，你可以对照简历原文和岗位要求，逐条查看修改建议，补充真实经历，再整理成一份可继续编辑的 Word 简历。
-
-项目围绕一次具体投递展开：从结构与阅读、经历表达、岗位相关三个维度检查简历，让每条建议都有可核对的依据。你可以采纳、跳过或调整措辞；需要补充信息时，先确认事实，再生成改写。最终采用哪些内容，由你决定。
+AIResume（叙职）是一款面向应届生和校招生的在线简历编辑工具。上传简历、提供目标岗位后，可以对照原文和岗位要求逐条修改，再导出可编辑的 Word 简历。
 
 [在线体验](https://key123456.online/app/) · [查看虚构示例](https://key123456.online/app/?demo=1) · [数据处理说明](https://key123456.online/privacy/)
 
-当前界面和分析提示以中文为主。
+## 快速开始
+
+打开[虚构示例](https://key123456.online/app/?demo=1)，无需注册、上传个人材料或配置 API Key。进入后应看到预填的简历和「逐条修改」建议；试着采纳一条，切到「简历预览」即可核对更新后的内容。示例不会调用模型，也不能导出 Word。
+
+使用自己的材料时，打开[在线工作台](https://key123456.online/app/)，上传 Word 或文字型 PDF，粘贴目标岗位描述。先核对读取结果，再分析、逐条修改和预览；完成后可导出 DOCX。当前界面和分析提示以中文为主。
 
 ## 主要功能
 
@@ -20,15 +20,6 @@ AIResume（叙职）是一款面向应届生与校招生的在线简历优化工
 - **预览与 Word 导出**：将已采纳的修改整理为统一的简洁版式，预览后导出可编辑的 DOCX。
 - **自选模型服务**：展示默认模型名称，支持内置第三方服务和自定义 API，可获取模型目录、保存多个模型并切换本次使用的模型。
 - **免注册使用**：无需创建账号；提供不调用模型的虚构示例，方便先了解修改流程。
-- **字号与小屏适配**：界面文字随用户字号设置缩放，标题和控件可换行；模型输入支持中文输入法确认操作。
-- **简洁的操作界面**：首页保留简介与改写对照、使用步骤两个区块，去除重复的底部宣传区；标题字号与工作台一致。当前模型直接显示在设置入口，高级选项按需展开。
-
-## 使用流程
-
-1. **准备材料**：上传 Word 或文字型 PDF，粘贴目标岗位的职责与要求。
-2. **核对读取结果**：检查姓名、教育、项目和工作经历是否完整，确认后开始分析。
-3. **逐条修改**：查看建议与依据，选择采纳、跳过或编辑，按需补充真实经历。
-4. **预览并导出**：检查整理后的简历，确认后下载 Word 文档，并清除本次资料。
 
 ## 模型接入
 
@@ -70,23 +61,28 @@ scripts/   本地启动与浏览器验证脚本
 
 ## 本地运行
 
-需要 Node.js 24、Python 3.12 和 uv。在仓库根目录安装依赖：
+以下命令使用 PowerShell，需要 Node.js 24（含 npm）、Python 3.12 和 uv。先克隆仓库并安装依赖：
 
 ```powershell
-cd web
+git clone https://github.com/yiqi-7/AIResume.git
+cd AIResume
+Push-Location web
 npm ci
-cd ../api
-uv sync --group dev
+Pop-Location
+Push-Location api
+uv sync --locked --group dev
+Pop-Location
 ```
 
-在仓库根目录的两个终端分别运行：
+只体验虚构示例时，在仓库根目录启动前端即可：
 
 ```powershell
-./scripts/dev.ps1 api
-./scripts/dev.ps1 web
+.\scripts\dev.ps1 web
 ```
 
-打开 [本地工作台](http://127.0.0.1:4321/app/)。站方模型配置参考 [api/.env.example](api/.env.example)，或直接在页面中配置自己的模型服务。无需调用模型时，可打开[本地虚构示例](http://127.0.0.1:4321/app/?demo=1)。
+打开[本地虚构示例](http://127.0.0.1:4321/app/?demo=1)，应看到「逐条修改」和「简历预览」。只运行示例可以跳过上面的 API 依赖安装。
+
+如需启动后端，在仓库根目录的另一个终端运行 `.\scripts\dev.ps1 api`。访问 [API 健康检查](http://127.0.0.1:8010/healthz) 应返回 `{"status":"ok"}`，再打开[本地工作台](http://127.0.0.1:4321/app/)。站方模型配置见 [api/.env.example](api/.env.example)；也可在页面中配置自己的模型服务。
 
 ### 真实文件上传
 
@@ -105,13 +101,19 @@ DOC 转换、Word 排版与 PDF 提取都在受限隔离进程中运行，限制
 
 ```powershell
 cd api
-uv run ruff check app tests
+uv run ruff check app tests ../scripts/browser_qa.py ../deploy/generate_cloudflare_nginx.py
 uv run pytest -q
 cd ../web
 npm run check
 npm run build
 ```
 
-浏览器流程验证脚本为 [scripts/browser_qa.py](scripts/browser_qa.py)，使用模拟模型与页数服务；真实隔离读取服务由 Ubuntu 集成测试验证。真实模型的可用性与生成效果需要结合所选服务单独验证。
+完整的[验收工作流](.github/workflows/checks.yml)包含 Ubuntu 上的 Redis、nginx 和隔离读取服务集成检查。[浏览器验证脚本](scripts/browser_qa.py)使用模拟模型与页数服务；真实模型的可用性与生成效果需结合所选服务验证。
 
 前端实现参考 [Modern Web Guidance](https://github.com/GoogleChrome/modern-web-guidance)，按浏览器支持情况渐进增强排版、表单和无障碍体验。
+
+## 反馈与许可证
+
+遇到问题可以提交 [GitHub Issue](https://github.com/yiqi-7/AIResume/issues)，附上复现步骤、系统和浏览器版本；请用虚构简历复现，避免上传个人简历或 API Key。
+
+仓库目前没有项目级许可证。随前端分发的字体许可证见 [OFL.txt](web/public/OFL.txt)。
